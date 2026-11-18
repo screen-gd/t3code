@@ -31,11 +31,12 @@ const dependencies = [
 // Status and stopping go through the task's card, with task_status and task_cancel.
 const HopliteTaskTool = Tool.make("hoplite_task", {
   description:
-    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. Pass `repo` as the GitHub owner/name to work in, usually this checkout's origin; Hoplite uses or creates its project for it. Track it with task_status and task_cancel.",
+    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `model` picks a Hoplite model by id or name. Pass `repo` as the GitHub owner/name to work in, usually this checkout's origin; Hoplite uses or creates its project for it. Track it with task_status and task_cancel.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
     threadId: Schema.optional(HopliteCloudSendMessageInput.fields.threadId),
     questionId: Schema.optional(HopliteCloudAnswerInput.fields.questionId),
+    model: HopliteCloudStartTaskInput.fields.model,
     title: HopliteCloudStartTaskInput.fields.title,
     repo: HopliteCloudStartTaskInput.fields.repo,
     projectId: HopliteCloudStartTaskInput.fields.projectId,

@@ -146,6 +146,16 @@ const DiffResponse = Schema.Struct({
 });
 
 const SetEnvResponse = Schema.Struct({ envVar: Schema.Struct({ key: Schema.String }) });
+const ModelsResponse = Schema.Struct({
+  models: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
+});
+
+// "GPT 6 Luna", "gpt-6 luna" and "gpt-6-luna" all name one model.
+const modelKey = (name: string) => name.toLowerCase().replace(/[^a-z0-9.]+/g, "");
+
+const ActiveRunResponse = Schema.Struct({
+  activeRun: Schema.optional(Schema.NullOr(Schema.Struct({ runId: Schema.String }))),
+});
 
 const PreviewResponse = Schema.Struct({
   preview: Schema.Struct({
@@ -228,6 +238,7 @@ const MESSAGES: Record<HopliteCloudErrorCode, string> = {
     "Name the GitHub repo (owner/name) to work in, or set a default Hoplite project in Settings > Environments.",
   repo_unavailable:
     "Hoplite's GitHub app cannot see that repository. Install it on the repository from Hoplite, then try again.",
+  model_unavailable: "Hoplite has no such model for this key.",
   rate_limited: "Hoplite is rate limiting this key. Try again in a minute.",
   unavailable: "Hoplite could not be reached.",
 };
@@ -392,12 +403,27 @@ const make = Effect.gen(function* () {
       clientRequestId === undefined ? random.uuidV4() : Effect.succeed(clientRequestId),
       (key) => HttpClientRequest.setHeader("Idempotency-Key", `t3code:${key}`),
     );
-  // A thread still preparing its sandbox has no run yet, so its run is simply absent.
-  const readRunState = (apiKey: string, threadId: string) =>
-    send(apiKey, HttpClientRequest.get(`${threadPath(threadId)}/run-state`), RunStateResponse).pipe(
-      Effect.option,
-      Effect.map((state) => Option.getOrUndefined(state)?.run ?? null),
-    );
+  // run-state without a runId reports the latest finished run, never one queued, running or
+  // waiting on a question, so the active run is asked for by id. A thread still preparing has none.
+  const readRunState = Effect.fn("HopliteCloud.readRunState")(function* (
+    apiKey: string,
+    threadId: string,
+  ) {
+    const active = yield* send(
+      apiKey,
+      HttpClientRequest.get(`${threadPath(threadId)}/active-run`),
+      ActiveRunResponse,
+    ).pipe(Effect.option);
+    const activeRunId = Option.getOrUndefined(active)?.activeRun?.runId;
+    const state = yield* send(
+      apiKey,
+      HttpClientRequest.get(`${threadPath(threadId)}/run-state`).pipe(
+        HttpClientRequest.setUrlParams(activeRunId === undefined ? {} : { runId: activeRunId }),
+      ),
+      RunStateResponse,
+    ).pipe(Effect.option);
+    return Option.getOrUndefined(state)?.run ?? null;
+  });
 
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId,
@@ -417,6 +443,27 @@ const make = Effect.gen(function* () {
 
   const getTask = (input: HopliteCloudGetTaskInput) =>
     Effect.map(readTask(input), ({ task }) => task);
+
+  // Hoplite would reject an unknown id; this also maps a name the user said to its id.
+  const resolveModel = Effect.fn("HopliteCloud.resolveModel")(function* (
+    apiKey: string,
+    requested: string,
+  ) {
+    const { models = [] } = yield* send(
+      apiKey,
+      HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/model-providers`),
+      ModelsResponse,
+    );
+    const key = modelKey(requested);
+    const match =
+      models.find((model) => model.id === requested) ??
+      models.find((model) => modelKey(model.id) === key || modelKey(model.name) === key);
+    if (match !== undefined) return match.id;
+    return yield* new HopliteCloudError({
+      code: "model_unavailable",
+      message: `Hoplite has no model "${requested}" for this key. Available: ${models.map((model) => model.id).join(", ") || "none"}.`,
+    });
+  });
 
   // Reuses the project that already has the repository, so its setup and secrets apply.
   const projectForRepo = Effect.fn("HopliteCloud.projectForRepo")(function* (
@@ -454,6 +501,7 @@ const make = Effect.gen(function* () {
     input: HopliteCloudStartTaskInput,
   ) {
     const apiKey = yield* requireKey;
+    const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
     const projectId =
       input.projectId ??
       (input.repo === undefined
@@ -466,6 +514,7 @@ const make = Effect.gen(function* () {
         projectId,
         prompt: input.prompt,
         ...(input.title === undefined ? {} : { title: input.title }),
+        ...(model === undefined ? {} : { model }),
       }),
     );
     const { thread, run } = yield* send(apiKey, request, CreateThreadResponse);
@@ -476,9 +525,13 @@ const make = Effect.gen(function* () {
     input: HopliteCloudSendMessageInput,
   ) {
     const apiKey = yield* requireKey;
+    const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
     const request = HttpClientRequest.post(`${threadPath(input.threadId)}/messages`).pipe(
       yield* idempotent(input.clientRequestId),
-      HttpClientRequest.bodyJsonUnsafe({ content: input.message }),
+      HttpClientRequest.bodyJsonUnsafe({
+        content: input.message,
+        ...(model === undefined ? {} : { model }),
+      }),
     );
     const { run } = yield* send(apiKey, request, AppendMessageResponse);
     return { runId: run?.id ?? null };

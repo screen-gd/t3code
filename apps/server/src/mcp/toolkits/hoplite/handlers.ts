@@ -14,9 +14,11 @@ const toFailure = (error: HopliteCloudError) =>
     code:
       error.code === "not_found"
         ? "task_not_found"
-        : error.code === "project_required" || error.code === "repo_unavailable"
-          ? "target_required"
-          : "provider_unavailable",
+        : error.code === "model_unavailable"
+          ? "model_unavailable"
+          : error.code === "project_required" || error.code === "repo_unavailable"
+            ? "target_required"
+            : "provider_unavailable",
     message: error.message,
   });
 
@@ -29,7 +31,7 @@ const callerThreadId = Effect.map(
 const handlers = {
   // These spend the controller's Hoplite key, so read-only clients and linked environments may not.
   hoplite_task: McpToolAccess.writesWithCapability(
-    ({ threadId, questionId, prompt, title, projectId, repo, clientRequestId }) =>
+    ({ threadId, questionId, prompt, model, title, projectId, repo, clientRequestId }) =>
       questionId !== undefined && threadId === undefined
         ? Effect.fail(
             new OrchestratorMcpFailure({
@@ -43,6 +45,7 @@ const handlers = {
                 ? watch.startTask(
                     {
                       prompt,
+                      ...(model === undefined ? {} : { model }),
                       ...(title === undefined ? {} : { title }),
                       ...(projectId === undefined ? {} : { projectId }),
                       ...(repo === undefined ? {} : { repo }),
@@ -64,6 +67,7 @@ const handlers = {
                       {
                         threadId,
                         message: prompt,
+                        ...(model === undefined ? {} : { model }),
                         ...(clientRequestId === undefined ? {} : { clientRequestId }),
                       },
                       caller,

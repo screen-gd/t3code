@@ -110,6 +110,17 @@ const makeHarness = () => {
         preview: { name: "web", status: "starting", port: 3000, url: "https://web.preview.test" },
       });
     }
+    if (url.pathname === "/api/model-providers") {
+      return respond(200, {
+        ok: true,
+        modelConfigurationRevision: "r1",
+        providers: [],
+        models: [
+          { id: "gpt-6-luna", name: "GPT-6 Luna", provider: "openai" },
+          { id: "claude-sonnet-5", name: "Claude Sonnet 5", provider: "anthropic" },
+        ],
+      });
+    }
     if (request.method === "PUT" && url.pathname === "/api/projects/prj_1/env-vars/STRIPE_KEY") {
       return respond(200, { ok: true, envVar: { key: "STRIPE_KEY", updatedAt: "2026-01-01" } });
     }
@@ -183,11 +194,21 @@ const makeHarness = () => {
       });
     }
     if (url.pathname === "/api/threads/thr_1") return respond(200, { ok: true, thread });
+    if (url.pathname === "/api/threads/thr_1/active-run") {
+      return respond(200, { ok: true, activeRun: { runId: "run_1", status: "running" } });
+    }
+    // Like Hoplite, run-state without a runId is the latest finished run, not the active one.
     if (url.pathname === "/api/threads/thr_1/run-state") {
-      return respond(200, {
-        ok: true,
-        run: { runId: "run_1", status: "running", assistantMessage: { content: "Tests pass." } },
-      });
+      return Option.isNone(UrlParams.getFirst(request.urlParams, "runId"))
+        ? respond(200, { ok: true, run: { runId: "run_0", status: "completed" } })
+        : respond(200, {
+            ok: true,
+            run: {
+              runId: "run_1",
+              status: "running",
+              assistantMessage: { content: "Tests pass." },
+            },
+          });
     }
     return respond(404, { ok: false, error: "not_found" });
   });
@@ -281,12 +302,17 @@ it.effect("a task naming a repo uses the project that has it, or creates one", (
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect("a task reads its latest reply and pull request", () => {
+it.effect("a task reads its active run, latest reply and pull request", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
     assert.equal(yield* errorCode(hoplite.getTask({ threadId: "thr_1" })), "not_connected");
     yield* hoplite.connect(GOOD_KEY);
+    // Not run_0, the finished run Hoplite reports when asked without a run id.
+    assert.deepStrictEqual((yield* hoplite.readTask({ threadId: "thr_1" })).run, {
+      id: "run_1",
+      status: "running",
+    });
     assert.deepStrictEqual(yield* hoplite.getTask({ threadId: "thr_1" }), {
       threadId: "thr_1",
       projectId: "prj_1",
@@ -404,5 +430,31 @@ it.effect("a variable a task needs is stored, encrypted, on that task's project"
     const put = harness.sent.find((request) => request.method === "PUT");
     assert.equal(put?.path, "/api/projects/prj_1/env-vars/STRIPE_KEY");
     assert.deepStrictEqual(put?.body, { value: "sk_test" });
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a model named the way a person says it runs as Hoplite's id for it", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const hoplite = yield* HopliteCloud.HopliteCloud;
+    yield* hoplite.connect(GOOD_KEY);
+    yield* hoplite.setDefaultProject({ projectId: "prj_1" });
+    yield* hoplite.startTask({ prompt: "Fix login", model: "GPT 6 Luna" });
+    const create = harness.sent.find(
+      (request) => request.method === "POST" && request.path === "/api/threads",
+    );
+    assert.deepStrictEqual(create?.body, {
+      projectId: "prj_1",
+      prompt: "Fix login",
+      model: "gpt-6-luna",
+    });
+
+    yield* hoplite.sendMessage({ threadId: "thr_1", message: "Again", model: "claude-sonnet-5" });
+    const message = harness.sent.find((request) => request.path.endsWith("/messages"));
+    assert.deepStrictEqual(message?.body, { content: "Again", model: "claude-sonnet-5" });
+
+    const unknown = yield* Effect.flip(hoplite.startTask({ prompt: "Fix", model: "gpt-9" }));
+    assert.equal(unknown.code, "model_unavailable");
+    assert.include(unknown.message, "gpt-6-luna, claude-sonnet-5");
   }).pipe(Effect.provide(harness.layer));
 });

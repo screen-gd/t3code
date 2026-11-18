@@ -8,6 +8,7 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
  * agents only ever see project and thread records, never the key.
  */
 const HopliteId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
+const HopliteModel = Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128)));
 
 export const HopliteCloudProject = Schema.Struct({
   id: HopliteId,
@@ -69,6 +70,8 @@ export const HopliteCloudStartTaskInput = Schema.Struct({
   projectId: Schema.optional(HopliteId),
   /** A GitHub `owner/name`; picks the Hoplite project with it, creating one when none has it. */
   repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+  /** A Hoplite model id or name, such as `gpt-6-luna` or "GPT 6 Luna"; omitted uses Hoplite's default. */
+  model: HopliteModel,
   /** Makes retries create one thread. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
@@ -80,6 +83,7 @@ export type HopliteCloudGetTaskInput = typeof HopliteCloudGetTaskInput.Type;
 export const HopliteCloudSendMessageInput = Schema.Struct({
   threadId: HopliteId,
   message: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+  model: HopliteModel,
   /** Makes retries send one message. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
@@ -175,6 +179,7 @@ export const HopliteCloudErrorCode = Schema.Literals([
   "not_found",
   "project_required",
   "repo_unavailable",
+  "model_unavailable",
   "rate_limited",
   "unavailable",
 ]);
