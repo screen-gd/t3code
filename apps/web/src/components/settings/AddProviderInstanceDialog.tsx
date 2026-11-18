@@ -50,7 +50,12 @@ import { WizardPanel, WizardPopup, WizardHeader, WizardFooter } from "../ui/wiza
 import {
   ADD_PROVIDER_WIZARD_STEPS,
   ACP_REGISTRY_WIZARD_STEPS,
+  HOPLITE_LABEL,
+  HOPLITE_LOCAL_ACP_CONFIG,
   LOCAL_ACP_WIZARD_STEPS,
+  hopliteProjectId,
+  isHopliteLocalCommand,
+  withHopliteProjectId,
   resolveAcpRegistryWizardNavigation,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
@@ -361,23 +366,29 @@ export function AddProviderInstanceDialog({
     setHasAttemptedSubmit(false);
   };
 
-  const handleLocalAcpConfiguration = () => {
+  const handleLocalAcpConfiguration = (preset?: "hoplite") => {
     setDriver(ACP_REGISTRY_DRIVER_KIND);
     setSelectedAcp(null);
     setIsManualAcpConfiguration(true);
     setConfigByDriver((existing) => ({
       ...existing,
-      [ACP_REGISTRY_DRIVER_KIND]: { source: "local", commandArgs: [] },
+      [ACP_REGISTRY_DRIVER_KIND]:
+        preset === "hoplite"
+          ? { ...HOPLITE_LOCAL_ACP_CONFIG, commandArgs: [...HOPLITE_LOCAL_ACP_CONFIG.commandArgs] }
+          : { source: "local", commandArgs: [] },
     }));
     setIdentityByDriver((existing) =>
       updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
-        label: gt("Local ACP"),
+        label: preset === "hoplite" ? HOPLITE_LABEL : gt("Local ACP"),
         instanceIdOverride: null,
       }),
     );
     setLocalEnvironment([]);
     setHasAttemptedSubmit(false);
   };
+  const localCommandArgs = Array.isArray(configDraft.commandArgs)
+    ? configDraft.commandArgs.filter((arg): arg is string => typeof arg === "string")
+    : [];
 
   // A policy that owns this driver's launch settings also rules out ChatGPT's own runtime.
   const driverLocks = managedInstanceLocks(managedPolicy, driver, m);
@@ -575,6 +586,41 @@ export function AddProviderInstanceDialog({
                               onChange={setConfigDraft}
                               environmentId={environmentId}
                             />
+                            {isLocalAcp && isHopliteLocalCommand(localCommandPath) ? (
+                              <SettingsRow
+                                title={
+                                  <label htmlFor="add-provider-hoplite-project">
+                                    <T>Hoplite project ID</T>
+                                  </label>
+                                }
+                                description={
+                                  <span id="add-provider-hoplite-project-description">
+                                    <T>
+                                      Optional. Without it, Hoplite uses the project linked to each
+                                      thread's repository.
+                                    </T>
+                                  </span>
+                                }
+                                control={
+                                  <Input
+                                    id="add-provider-hoplite-project"
+                                    aria-describedby="add-provider-hoplite-project-description"
+                                    size="sm"
+                                    className="w-full @min-[32rem]/settings-row:w-56"
+                                    value={hopliteProjectId(localCommandArgs)}
+                                    onChange={(event) =>
+                                      setConfigDraft({
+                                        ...configDraft,
+                                        commandArgs: withHopliteProjectId(
+                                          localCommandArgs,
+                                          event.target.value,
+                                        ),
+                                      })
+                                    }
+                                  />
+                                }
+                              />
+                            ) : null}
                             {isLocalAcp ? (
                               <ProviderEnvironmentSection
                                 environment={localEnvironment}
@@ -596,7 +642,8 @@ export function AddProviderInstanceDialog({
                             providerInstances={settings.providerInstances}
                             onPrepared={handleAcpPrepared}
                             onManualConfiguration={handleManualAcpConfiguration}
-                            onLocalConfiguration={handleLocalAcpConfiguration}
+                            onLocalConfiguration={() => handleLocalAcpConfiguration()}
+                            onHopliteConfiguration={() => handleLocalAcpConfiguration("hoplite")}
                           />
                           {isAcpRegistry && hasAttemptedSubmit && acpSelectionError ? (
                             <p className="mt-2 text-2xs text-destructive">{acpSelectionError}</p>

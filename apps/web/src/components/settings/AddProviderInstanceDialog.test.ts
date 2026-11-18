@@ -2,7 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   getProviderIdentityDraft,
+  hopliteProjectId,
   resolveAcpRegistryWizardNavigation,
+  withHopliteProjectId,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
 } from "./AddProviderInstanceDialog.logic";
@@ -69,5 +71,13 @@ describe("ACP Registry wizard", () => {
       label: "Gemini CLI",
       instanceIdOverride: "acpRegistry_gemini_cli",
     });
+  });
+
+  it("maps the Hoplite project ID to a single --project argument", () => {
+    const pinned = withHopliteProjectId(["acp"], " proj_1 ");
+    expect(pinned).toEqual(["acp", "--project", "proj_1"]);
+    expect(hopliteProjectId(pinned)).toBe("proj_1");
+    expect(withHopliteProjectId(pinned, "proj_2")).toEqual(["acp", "--project", "proj_2"]);
+    expect(withHopliteProjectId(pinned, "")).toEqual(["acp"]);
   });
 });

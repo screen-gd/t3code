@@ -110,6 +110,11 @@ const OMP_SETTINGS = Schema.decodeSync(AcpRegistrySettings)({
   commandPath: "/usr/local/bin/omp",
   commandArgs: ["acp"],
 });
+const HOPLITE_SETTINGS = Schema.decodeSync(AcpRegistrySettings)({
+  source: "local",
+  commandPath: "/usr/local/bin/hoplite",
+  commandArgs: ["acp"],
+});
 const OPENCODE_SETTINGS = Schema.decodeSync(AcpRegistrySettings)({
   source: "local",
   commandPath: "/usr/local/bin/opencode",
@@ -2331,6 +2336,171 @@ describe("AcpAdapterV2", () => {
           assert.equal(retries.at(-1)?.title, "Provider recovered");
         }
       }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.live("projects Hoplite run phases and partial edit diffs", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-hoplite-run-" });
+      const driver = ProviderDriverKind.make("acpRegistry");
+      const sessionId = "hoplite-session";
+      const phase = (label: string) => ({
+        type: "emit_inbound" as const,
+        frame: {
+          kind: "notification" as const,
+          method: "_hoplite/run_phase",
+          params: { sessionId, runId: "run_1", phase: label, label, startedAt: null },
+        },
+      });
+      const partial = { hoplite: { operation: "update", partial: true } };
+      const transcript = yield* decodeAcpReplayTranscript(
+        {
+          provider: driver,
+          protocol: "acp.ndjson-jsonrpc",
+          version: "1",
+          scenario: "hoplite-run",
+          entries: [
+            {
+              type: "expect_outbound",
+              frame: { kind: "request", method: "initialize", params: "<any>" },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                kind: "response",
+                method: "initialize",
+                result: { protocolVersion: 1, agentCapabilities: {}, authMethods: [] },
+              },
+            },
+            {
+              type: "expect_outbound",
+              frame: { kind: "request", method: "session/new", params: "<any>" },
+            },
+            {
+              type: "emit_inbound",
+              frame: { kind: "response", method: "session/new", result: { sessionId } },
+            },
+            {
+              type: "expect_outbound",
+              frame: { kind: "request", method: "session/prompt", params: "<any>" },
+            },
+            // The second phase never ends with `label: null`; the turn end must close it.
+            phase("Starting sandbox"),
+            phase("Cloning repository"),
+            {
+              type: "emit_inbound",
+              frame: {
+                kind: "notification",
+                method: "session/update",
+                params: {
+                  sessionId,
+                  update: {
+                    sessionUpdate: "tool_call",
+                    toolCallId: "hoplite-edit",
+                    title: "Edit src/auth.ts",
+                    kind: "edit",
+                    status: "completed",
+                    content: [
+                      {
+                        type: "diff",
+                        path: "src/auth.ts",
+                        oldText: "a < b",
+                        newText: "a <= b",
+                        _meta: partial,
+                      },
+                      {
+                        type: "diff",
+                        path: "src/auth.ts",
+                        oldText: "x",
+                        newText: "y",
+                        _meta: partial,
+                      },
+                    ],
+                  },
+                },
+              },
+            },
+            {
+              type: "emit_inbound",
+              frame: {
+                kind: "response",
+                method: "session/prompt",
+                result: { stopReason: "end_turn" },
+              },
+            },
+            { type: "runtime_exit", status: "success" },
+          ],
+        },
+        driver,
+      );
+      const instanceId = ProviderInstanceId.make("hoplite-run");
+      const threadId = ThreadId.make("thread-hoplite-run");
+      const adapter = yield* makeAcpRegistryAdapterV2({
+        instanceId,
+        selfInvocation: yield* resolveSelfInvocation(),
+        settings: HOPLITE_SETTINGS,
+        environment: {},
+        makeRuntime: makeAcpReplayRuntime({
+          transcript,
+          statusPath: path.join(directory, "status.json"),
+          fileSystem,
+          scriptPath: yield* bundledReplayAgentPath,
+          childProcessSpawner: yield* ChildProcessSpawner.ChildProcessSpawner,
+        }),
+      }).pipe(
+        Effect.provide(
+          Layer.mock(AcpRegistryCatalog)({ resolve: () => Effect.die("runtime is injected") }),
+        ),
+      );
+      const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: directory,
+      });
+      const modelSelection = { instanceId, model: "default" } as const;
+      const runtime = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("session-hoplite-run"),
+        modelSelection,
+        runtimePolicy,
+      });
+      const providerThread = yield* runtime.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy,
+      });
+      yield* runtime.startTurn(
+        makeTurnInput({
+          threadId,
+          providerThread,
+          instanceId,
+          runtimePolicy,
+          now: yield* DateTime.now,
+        }),
+      );
+      const items = (yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.type === "turn.terminal"),
+        Stream.runCollect,
+      )).flatMap((event) => (event.type === "turn_item.updated" ? [event.turnItem] : []));
+      const phases = new Map<string, { message: string; status: string }>();
+      for (const item of items) {
+        if (item.type === "system_notice") phases.set(item.id, item);
+      }
+      assert.deepEqual(
+        [...phases.values()].map(({ message, status }) => ({ message, status })),
+        [
+          { message: "Starting sandbox", status: "completed" },
+          { message: "Cloning repository", status: "completed" },
+        ],
+      );
+      const edit = items.findLast((item) => item.type === "file_change");
+      if (edit?.type !== "file_change") return yield* Effect.die("Missing file change");
+      // Partial hunks have no line numbers, so they render as one snippet, not a patch from line 1.
+      assert.isUndefined(edit.diffStr);
+      assert.equal(edit.oldStr, "a < b\n⋯\nx");
+      assert.equal(edit.newStr, "a <= b\n⋯\ny");
+    }).pipe(Effect.provide(layerTest)),
   );
 
   it.live.each([

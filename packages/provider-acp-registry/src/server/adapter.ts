@@ -10,6 +10,11 @@ import {
   devinAnswerablePermissionOptions,
 } from "./devinAcp.ts";
 import { extractDroidElicitationForm } from "./droidAcp.ts";
+import {
+  isHopliteAcpCommand,
+  normalizeHopliteToolCall,
+  registerHopliteAcpExtensions,
+} from "./hopliteAcp.ts";
 import { makeKimiPromptOutcomeWatch } from "./kimiAcp.ts";
 import { extractOmpElicitationForm } from "./ompAcp.ts";
 import { extractOpenCodeElicitationForm } from "./opencodeAcp.ts";
@@ -215,6 +220,7 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
   const isHermes =
     options.settings.source === "local" &&
     /^hermes(\.exe|\.cmd)?$/i.test(options.settings.commandPath.split(/[\\/]/).pop() ?? "");
+  const isHoplite = isHopliteAcpCommand(options.settings);
   const isClaude =
     registryAgentId === "claude-acp" ||
     (options.settings.source === "local" &&
@@ -264,6 +270,12 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
     ...(watchKimiPromptOutcome === undefined ? {} : { watchPromptOutcome: watchKimiPromptOutcome }),
     ...(registryAgentId === "mistral-vibe"
       ? { registerExtensions: registerMistralVibeAcpExtensions }
+      : {}),
+    ...(isHoplite
+      ? {
+          registerExtensions: registerHopliteAcpExtensions,
+          normalizeToolCall: normalizeHopliteToolCall,
+        }
       : {}),
     ...(isClaude
       ? {

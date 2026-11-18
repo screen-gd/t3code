@@ -29,7 +29,7 @@ import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { isConfiguredAcpRegistryAgent } from "./AddProviderInstanceDialog.logic";
+import { HOPLITE_LABEL, isConfiguredAcpRegistryAgent } from "./AddProviderInstanceDialog.logic";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { providerClients } from "./providerDriverMeta";
@@ -138,6 +138,7 @@ interface AcpRegistrySearchStepProps {
   readonly onPrepared: (agent: AcpRegistrySearchAgent) => void;
   readonly onManualConfiguration: () => void;
   readonly onLocalConfiguration?: () => void;
+  readonly onHopliteConfiguration?: () => void;
 }
 
 export function AcpRegistrySearchStep({
@@ -147,6 +148,7 @@ export function AcpRegistrySearchStep({
   onPrepared,
   onManualConfiguration,
   onLocalConfiguration,
+  onHopliteConfiguration,
 }: AcpRegistrySearchStepProps) {
   const gt = useGT();
   const canManageProviders = useEnvironmentScope(environmentId, AuthProvidersManageScope);
@@ -207,6 +209,17 @@ export function AcpRegistrySearchStep({
             variant="outline"
           >
             <T>Local ACP command</T>
+          </Button>
+        ) : null}
+        {onHopliteConfiguration ? (
+          <Button
+            disabled={preparingId !== null}
+            onClick={onHopliteConfiguration}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {HOPLITE_LABEL}
           </Button>
         ) : null}
       </form>

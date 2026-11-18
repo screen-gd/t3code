@@ -22,6 +22,32 @@ export const ACP_REGISTRY_WIZARD_STEPS = [
 ] as const;
 export const LOCAL_ACP_WIZARD_STEPS = [PROVIDER_STEP, IDENTITY_STEP_LABEL] as const;
 
+/** Product name; not translated. */
+export const HOPLITE_LABEL = "Hoplite";
+
+/** Hoplite's CLI is an ACP agent; https://hoplite.sh/docs/cli/acp */
+export const HOPLITE_LOCAL_ACP_CONFIG = {
+  source: "local",
+  commandPath: "hoplite",
+  commandArgs: ["acp"],
+} as const;
+
+export function isHopliteLocalCommand(commandPath: string): boolean {
+  return /^hoplite(\.exe|\.cmd)?$/i.test(commandPath.trim().split(/[\\/]/).pop() ?? "");
+}
+
+export function hopliteProjectId(args: ReadonlyArray<string>): string {
+  const index = args.indexOf("--project");
+  return index === -1 ? "" : (args[index + 1] ?? "");
+}
+
+export function withHopliteProjectId(args: ReadonlyArray<string>, projectId: string): string[] {
+  const index = args.indexOf("--project");
+  const rest = index === -1 ? [...args] : [...args.slice(0, index), ...args.slice(index + 2)];
+  const id = projectId.trim();
+  return id.length === 0 ? rest : [...rest, "--project", id];
+}
+
 export interface ProviderIdentityDraft {
   readonly label: string;
   readonly accentColor: string;
