@@ -128,9 +128,11 @@ function settledWake(
   const [what, outcome] =
     status === "waiting"
       ? ([
-          questions.length === 0
-            ? "is waiting for an answer. Reply with hoplite_task and its threadId."
-            : "is waiting for an answer. Answer with hoplite_task, its threadId and the questionId. If this thread cannot decide, ask the user.",
+          `is waiting for an answer. ${
+            questions.length === 0
+              ? "Reply with hoplite_task and its threadId."
+              : "Answer with hoplite_task, its threadId and the questionId."
+          } If this thread cannot decide, ask the user. For a secret or API key, use request_secret, then hoplite_env, never chat.`,
           "updated",
         ] as const)
       : status === "failed"

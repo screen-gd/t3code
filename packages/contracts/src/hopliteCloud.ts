@@ -133,6 +133,17 @@ export const HopliteCloudActivity = Schema.Struct({
 });
 export type HopliteCloudActivity = typeof HopliteCloudActivity.Type;
 
+/** A Hoplite project environment variable, set on the project of the task `threadId` runs in. */
+export const HopliteCloudSetEnvInput = Schema.Struct({
+  threadId: HopliteId,
+  key: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(128),
+    Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/),
+  ),
+  value: Schema.String.check(Schema.isMaxLength(32_768)),
+});
+export type HopliteCloudSetEnvInput = typeof HopliteCloudSetEnvInput.Type;
+
 export const HopliteCloudPreviewInput = Schema.Struct({
   threadId: HopliteId,
   /** Start the thread's preview server when it is not running. */

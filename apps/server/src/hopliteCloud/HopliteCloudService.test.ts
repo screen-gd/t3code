@@ -110,6 +110,9 @@ const makeHarness = () => {
         preview: { name: "web", status: "starting", port: 3000, url: "https://web.preview.test" },
       });
     }
+    if (request.method === "PUT" && url.pathname === "/api/projects/prj_1/env-vars/STRIPE_KEY") {
+      return respond(200, { ok: true, envVar: { key: "STRIPE_KEY", updatedAt: "2026-01-01" } });
+    }
     if (url.pathname === "/api/threads/thr_1/questions") {
       return respond(200, {
         ok: true,
@@ -390,3 +393,16 @@ it.effect(
     }).pipe(Effect.provide(harness.layer));
   },
 );
+
+it.effect("a variable a task needs is stored, encrypted, on that task's project", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const hoplite = yield* HopliteCloud.HopliteCloud;
+    yield* hoplite.connect(GOOD_KEY);
+    const saved = yield* hoplite.setEnv({ threadId: "thr_1", key: "STRIPE_KEY", value: "sk_test" });
+    assert.deepStrictEqual(saved, { projectId: "prj_1" });
+    const put = harness.sent.find((request) => request.method === "PUT");
+    assert.equal(put?.path, "/api/projects/prj_1/env-vars/STRIPE_KEY");
+    assert.deepStrictEqual(put?.body, { value: "sk_test" });
+  }).pipe(Effect.provide(harness.layer));
+});

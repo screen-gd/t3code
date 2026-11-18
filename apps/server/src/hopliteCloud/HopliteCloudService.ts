@@ -9,6 +9,7 @@ import {
   type HopliteCloudProject,
   type HopliteCloudQuestion,
   type HopliteCloudSendMessageInput,
+  type HopliteCloudSetEnvInput,
   type HopliteCloudSetDefaultProjectInput,
   type HopliteCloudStartTaskInput,
   type HopliteCloudStatus,
@@ -144,6 +145,8 @@ const DiffResponse = Schema.Struct({
   }),
 });
 
+const SetEnvResponse = Schema.Struct({ envVar: Schema.Struct({ key: Schema.String }) });
+
 const PreviewResponse = Schema.Struct({
   preview: Schema.Struct({
     status: HopliteCloudPreview.fields.status,
@@ -209,6 +212,10 @@ export class HopliteCloud extends Context.Service<
     readonly activity: (
       input: HopliteCloudGetTaskInput,
     ) => Effect.Effect<HopliteCloudActivity, HopliteCloudError>;
+    /** Stores an encrypted variable on the task's project; returns that project's id. */
+    readonly setEnv: (
+      input: HopliteCloudSetEnvInput,
+    ) => Effect.Effect<{ readonly projectId: string }, HopliteCloudError>;
   }
 >()("t3/hopliteCloud/HopliteCloudService/HopliteCloud") {}
 
@@ -625,6 +632,20 @@ const make = Effect.gen(function* () {
     } satisfies HopliteCloudActivity;
   });
 
+  const setEnv = Effect.fn("HopliteCloud.setEnv")(function* (input: HopliteCloudSetEnvInput) {
+    const apiKey = yield* requireKey;
+    const { thread } = yield* send(
+      apiKey,
+      HttpClientRequest.get(threadPath(input.threadId)),
+      ThreadResponse,
+    );
+    const request = HttpClientRequest.put(
+      `${HOPLITE_API_BASE_URL}/api/projects/${encodeURIComponent(thread.projectId)}/env-vars/${encodeURIComponent(input.key)}`,
+    ).pipe(yield* idempotent(undefined), HttpClientRequest.bodyJsonUnsafe({ value: input.value }));
+    yield* send(apiKey, request, SetEnvResponse);
+    return { projectId: thread.projectId };
+  });
+
   const connected = readSecret(HOPLITE_API_KEY_SECRET).pipe(
     Effect.map(Option.isSome),
     Effect.orElseSucceed(() => false),
@@ -645,6 +666,7 @@ const make = Effect.gen(function* () {
     listQuestions,
     answerQuestion,
     activity,
+    setEnv,
   });
 });
 
