@@ -236,6 +236,18 @@ again on its next connect.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## Hoplite cloud tasks
+
+Open **Settings → Environments → Add environment**, choose **Hoplite cloud**,
+and paste a [Hoplite](https://hoplite.sh) service account key with project read
+and thread write access. The key stays on the machine running T3 Code; clients
+and agents never see it. Pick a default project there.
+
+Agents can then hand a task to a Hoplite cloud thread, which runs in its own
+sandbox with that project's repository, and check its status and pull request
+later. Hoplite bills those threads to your Hoplite workspace. **Disconnect**
+removes the key.
+
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

@@ -191,6 +191,10 @@
       "types": "./src/state/git.ts",
       "default": "./src/state/git.ts"
     },
+    "./state/hopliteCloud": {
+      "types": "./src/state/hopliteCloud.ts",
+      "default": "./src/state/hopliteCloud.ts"
+    },
     "./state/command-output": {
       "types": "./src/state/commandOutput.ts",
       "default": "./src/state/commandOutput.ts"

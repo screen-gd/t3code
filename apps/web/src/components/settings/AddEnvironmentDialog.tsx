@@ -1,5 +1,5 @@
 import { pipe } from "effect/Function";
-import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ChevronsLeftRightEllipsisIcon, CloudIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
+import { HopliteCloudSetup } from "./HopliteCloudSetup";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
 import {
@@ -109,7 +110,7 @@ export function AddEnvironmentDialog({
     }
     return keys;
   })();
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
+  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh" | "hoplite">("remote");
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
@@ -348,7 +349,7 @@ export function AddEnvironmentDialog({
     setSavedBackendHost(value);
   };
   const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
+    readonly mode: "remote" | "ssh" | "hoplite";
     readonly title: string;
     readonly description: string;
     readonly icon?: ReactNode;
@@ -650,9 +651,23 @@ export function AddEnvironmentDialog({
                     icon: <TerminalIcon aria-hidden className="size-4" />,
                   })
                 : null}
+              {routeTarget
+                ? null
+                : renderConnectionModeCard({
+                    mode: "hoplite",
+                    title: "Hoplite cloud",
+                    description: "Agents run tasks in Hoplite sandboxes using this machine's key.",
+                    icon: <CloudIcon aria-hidden className="size-4" />,
+                  })}
             </div>
             <AnimatedHeight>
-              {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
+              {savedBackendMode === "ssh" ? (
+                renderSshFields()
+              ) : savedBackendMode === "hoplite" ? (
+                <HopliteCloudSetup />
+              ) : (
+                renderRemoteModeBody()
+              )}
             </AnimatedHeight>
           </div>
         </DialogPanel>

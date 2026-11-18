@@ -248,6 +248,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
+import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
@@ -1442,6 +1443,7 @@ export const layerWsRpc = (
       const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
       const sourceControlDiscovery = yield* SourceControlDiscovery.SourceControlDiscovery;
       const otlpEndpointCheck = yield* OtlpEndpointCheck.OtlpEndpointCheck;
+      const hopliteCloud = yield* HopliteCloud.HopliteCloud;
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const sourceControlSignIn = yield* SourceControlSignIn.SourceControlSignIn;
@@ -2625,6 +2627,13 @@ export const layerWsRpc = (
               ),
             ),
           ),
+        [WS_METHODS.hopliteCloudGetStatus]: (_input) => hopliteCloud.status,
+        [WS_METHODS.hopliteCloudConnect]: (input) => hopliteCloud.connect(input.apiKey),
+        [WS_METHODS.hopliteCloudDisconnect]: (_input) => hopliteCloud.disconnect,
+        [WS_METHODS.hopliteCloudSetDefaultProject]: (input) =>
+          hopliteCloud.setDefaultProject(input),
+        [WS_METHODS.hopliteCloudStartTask]: (input) => hopliteCloud.startTask(input),
+        [WS_METHODS.hopliteCloudGetTask]: (input) => hopliteCloud.getTask(input),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>
@@ -3448,6 +3457,7 @@ export const layer = Layer.unwrap(
               // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
+              Layer.provide(HopliteCloud.layer),
               Layer.provide(
                 Layer.succeed(
                   PullRequestReviewGuideService.PullRequestReviewGuideService,
