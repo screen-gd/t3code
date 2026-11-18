@@ -1,5 +1,5 @@
 import { pipe } from "effect/Function";
-import { ChevronsLeftRightEllipsisIcon, CloudIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -18,6 +18,7 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
+import { HopliteIcon } from "../Icons";
 import { HopliteCloudSetup } from "./HopliteCloudSetup";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -636,7 +637,12 @@ export function AddEnvironmentDialog({
         </DialogHeader>
         <DialogPanel>
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div
+              className={cn(
+                "grid gap-3 sm:grid-cols-2",
+                desktopBridge && !routeTarget && "sm:grid-cols-3",
+              )}
+            >
               {renderConnectionModeCard({
                 mode: "remote",
                 title: "Remote link",
@@ -647,7 +653,7 @@ export function AddEnvironmentDialog({
                 ? renderConnectionModeCard({
                     mode: "ssh",
                     title: "SSH",
-                    description: "Use local SSH config, agent, and tunnels for the backend.",
+                    description: "Use your SSH config, agent, and tunnels.",
                     icon: <TerminalIcon aria-hidden className="size-4" />,
                   })
                 : null}
@@ -655,9 +661,9 @@ export function AddEnvironmentDialog({
                 ? null
                 : renderConnectionModeCard({
                     mode: "hoplite",
-                    title: "Hoplite cloud",
-                    description: "Agents run tasks in Hoplite sandboxes using this machine's key.",
-                    icon: <CloudIcon aria-hidden className="size-4" />,
+                    title: "Hoplite",
+                    description: "Let agents hand tasks to Hoplite cloud sandboxes.",
+                    icon: <HopliteIcon aria-hidden className="size-4" />,
                   })}
             </div>
             <AnimatedHeight>

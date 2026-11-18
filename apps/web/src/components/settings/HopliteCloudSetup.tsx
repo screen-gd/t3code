@@ -14,7 +14,17 @@ import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { SettingsRow } from "./settingsLayout";
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+  DialogTrigger,
+} from "../ui/dialog";
+import { HopliteIcon } from "../Icons";
+import { SettingsRow, SettingsSection } from "./settingsLayout";
 
 const NO_DEFAULT_PROJECT = "__none__";
 
@@ -172,8 +182,11 @@ export function HopliteCloudSetup() {
   );
 }
 
-/** Lists a connected Hoplite under Environments, where users look for it after connecting. */
-export function HopliteCloudRow({ onManage }: { readonly onManage: () => void }) {
+/**
+ * A connected Hoplite gets its own section: it delegates tasks rather than
+ * pairing a machine, so it stays out of the paired environments list.
+ */
+export function HopliteCloudSection() {
   const environmentId = usePrimaryEnvironmentId();
   const canEdit = useAtomValue(hopliteCloudEnvironment.connect.permissionAtom(environmentId));
   const query = useEnvironmentQuery(
@@ -181,21 +194,38 @@ export function HopliteCloudRow({ onManage }: { readonly onManage: () => void })
       ? hopliteCloudEnvironment.status({ environmentId, input: {} })
       : null,
   );
+  const [manageOpen, setManageOpen] = useState(false);
   const status = query.data;
   if (status === null || !status.connected) return null;
   const project = status.projects.find((candidate) => candidate.id === status.defaultProjectId);
   return (
-    <SettingsRow
-      title="Hoplite cloud"
-      description={
-        status.problem ??
-        `Ask an agent to run a task in Hoplite. It runs in a cloud sandbox${project ? ` with ${project.name}` : ""} and reports back to the thread.`
-      }
-      control={
-        <Button size="sm" variant="outline" onClick={onManage}>
-          Manage
-        </Button>
-      }
-    />
+    <SettingsSection id="hoplite-cloud" title="Cloud agents">
+      <SettingsRow
+        title={
+          <span className="flex items-center gap-2">
+            <HopliteIcon aria-hidden className="size-4" />
+            Hoplite
+          </span>
+        }
+        description={
+          status.problem ??
+          `Agents can hand tasks to Hoplite. Each runs in a cloud sandbox${project ? ` with ${project.name}` : ""} and reports back to the thread.`
+        }
+        control={
+          <Dialog open={manageOpen} onOpenChange={setManageOpen}>
+            <DialogTrigger render={<Button size="sm" variant="outline" />}>Manage</DialogTrigger>
+            <DialogPopup className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Hoplite</DialogTitle>
+                <DialogDescription>Choose the default project or disconnect.</DialogDescription>
+              </DialogHeader>
+              <DialogPanel>
+                <HopliteCloudSetup />
+              </DialogPanel>
+            </DialogPopup>
+          </Dialog>
+        }
+      />
+    </SettingsSection>
   );
 }

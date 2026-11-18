@@ -136,7 +136,7 @@ import {
   SavedBackendListRow,
 } from "./SavedEnvironmentRows";
 import { AddEnvironmentDialog } from "./AddEnvironmentDialog";
-import { HopliteCloudRow } from "./HopliteCloudSetup";
+import { HopliteCloudSection } from "./HopliteCloudSetup";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -1515,17 +1515,12 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
             }}
           />
         ))}
-        <HopliteCloudRow
-          onManage={() => {
-            setSavedBackendError(null);
-            setAddBackendDialogOpen(true);
-          }}
-        />
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironments={savedEnvironments}
         />
       </SettingsSection>
+      <HopliteCloudSection />
       {hasCloudPublicConfig() ? (
         <RemoveT3ConnectEnvironmentDialog
           environmentLabel={pendingT3ConnectRemoval?.label ?? null}
