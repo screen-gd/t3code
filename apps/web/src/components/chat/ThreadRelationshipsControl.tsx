@@ -86,6 +86,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { Spinner } from "../ui/spinner";
+import { HopliteIcon } from "../Icons";
 import { cn } from "~/lib/utils";
 import {
   THREAD_DETAILS_PANEL_CHEVRON_CLASS,
@@ -285,9 +286,9 @@ function RemoteSubagentRow(props: {
         >
           <ThreadRelationshipIcon
             // The task's own driver here is only a "remote" label.
-            driver={props.provider?.driver}
+            driver={remoteChild.service === "hoplite" ? undefined : props.provider?.driver}
             provider={props.provider}
-            fallbackIcon={BotIcon}
+            fallbackIcon={remoteChild.service === "hoplite" ? HopliteIcon : BotIcon}
             status={status}
           />
           <span className="min-w-0 flex-1">

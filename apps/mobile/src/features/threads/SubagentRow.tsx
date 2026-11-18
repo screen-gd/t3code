@@ -153,7 +153,11 @@ function SubagentMetadata(props: {
         />
       ) : (
         <ProviderIcon
-          provider={provider?.driver ?? subagent.driver}
+          provider={
+            subagent.remoteChild?.service === "hoplite"
+              ? "hoplite"
+              : (provider?.driver ?? subagent.driver)
+          }
           iconUrl={provider?.iconUrl}
           size={12}
         />

@@ -1,6 +1,7 @@
 import type { ProviderDriverKind, ServerProvider } from "@t3tools/contracts";
 import { BotIcon, type LucideIcon } from "lucide-react";
 import { cn } from "../../lib/utils";
+import type { Icon } from "../Icons";
 import { shouldShowInstanceBadge, type ProviderInstanceEntry } from "../../providerInstances";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 
@@ -54,7 +55,7 @@ export function ThreadRelationshipIcon({
   provider?: ServerProvider | undefined;
   providerEntries?: ReadonlyArray<ProviderInstanceEntry>;
   status: string | null;
-  fallbackIcon?: LucideIcon;
+  fallbackIcon?: LucideIcon | Icon;
 }) {
   const iconClassName = "size-4 shrink-0 text-muted-foreground";
   const entry = driver

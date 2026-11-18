@@ -48,6 +48,7 @@ import {
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { HopliteIcon } from "../Icons";
 import {
   applyProviderInstanceSettings,
   brandProviderInstanceEntries,
@@ -217,6 +218,7 @@ function SubagentAvatar({
   iconUrl,
   accentColor,
   showBadge,
+  hoplite,
   status,
   className,
 }: {
@@ -225,6 +227,7 @@ function SubagentAvatar({
   iconUrl?: string | undefined;
   accentColor?: string | undefined;
   showBadge: boolean;
+  hoplite?: boolean;
   status?: OrchestrationV2TurnItem["status"] | undefined;
   className?: string;
 }) {
@@ -236,7 +239,9 @@ function SubagentAvatar({
         className,
       )}
     >
-      {driver ? (
+      {hoplite ? (
+        <HopliteIcon className="size-3.5" />
+      ) : driver ? (
         <ProviderInstanceIcon
           driverKind={driver}
           displayName={displayName ?? driver}
@@ -318,6 +323,7 @@ export function EnvironmentSubagentAvatar({
       iconUrl={iconUrl}
       accentColor={accentColor}
       showBadge={showBadge}
+      hoplite={remote?.service === "hoplite"}
     />
   );
 }
