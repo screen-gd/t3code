@@ -373,7 +373,7 @@ const make = Effect.gen(function* () {
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const answered = yield* hoplite.answerQuestion(input);
     if (callerThreadId === undefined) return before.task;
-    const runId = answered.runId ?? before.run?.id ?? null;
+    const runId = answered.runId;
     const taskId = yield* recordCard({
       callerThreadId,
       hopliteThreadId: input.threadId,
@@ -386,7 +386,8 @@ const make = Effect.gen(function* () {
       callerThreadId,
       hopliteThreadId: input.threadId,
       runId,
-      afterRunId: null,
+      // The run that asked has usually ended, so without a run id the answer's is the next one.
+      afterRunId: runId === null ? (before.run?.id ?? null) : null,
       seen: false,
       failures: 0,
       answeredQuestionId: input.questionId,
@@ -478,16 +479,17 @@ const make = Effect.gen(function* () {
       if (step.watch === watch && watch.failures === 0) return;
       return yield* replace(watch, { ...step.watch, failures: 0 });
     }
-    // Without its questions, a waiting wake can still say to reply with a message.
+    // Hoplite ends the run that asked, so a question can be pending behind a completed run.
     const questions =
-      step.status === "waiting"
+      step.status === "waiting" || step.status === "completed"
         ? yield* hoplite
             .listQuestions({ threadId: watch.hopliteThreadId })
             .pipe(Effect.orElseSucceed((): ReadonlyArray<HopliteCloudQuestion> => []))
         : [];
+    const status = questions.length > 0 ? "waiting" : step.status;
     if (
       watch.answeredQuestionId !== undefined &&
-      step.status === "waiting" &&
+      status === "waiting" &&
       questions.every((question) => question.questionId === watch.answeredQuestionId)
     ) {
       return;
@@ -495,11 +497,11 @@ const make = Effect.gen(function* () {
     yield* settle(
       watch,
       // A run can wait again on a later question; each one wakes once.
-      step.status === "waiting" && questions[0] !== undefined
+      status === "waiting" && questions[0] !== undefined
         ? `${step.runId}:${questions[0].questionId}`
         : step.runId,
-      settledWake(read.success.task, step.status, questions),
-      cardStatus(step.status),
+      settledWake(read.success.task, status, questions),
+      cardStatus(status),
     );
     yield* replace(watch, null);
   });

@@ -228,7 +228,8 @@ it.effect("a task's question wakes its caller once, and an answer waits for the 
   return Effect.gen(function* () {
     const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
     yield* watch.startTask({ prompt: "Fix login" }, "t3-thread");
-    harness.state.run = { id: "run_1", status: "waiting" };
+    // Hoplite ends the run that asked; its question stays pending behind a completed run.
+    harness.state.run = { id: "run_1", status: "completed" };
     harness.state.questions = [question("q_1", "Keep the old session cookie?")];
     yield* watch.sweep;
     const [asked] = wakes(harness.dispatched);
@@ -245,10 +246,11 @@ it.effect("a task's question wakes its caller once, and an answer waits for the 
     assert.deepStrictEqual(harness.state.answers, ["Yes"]);
     assert.equal(answered.next, HopliteTaskWatch.HOPLITE_TASK_WAKES_NEXT);
 
-    // Hoplite has not taken the answer yet, so the same question is still pending.
+    // The answer's run has not started, so the asking run is still the latest.
     yield* watch.sweep;
     assert.equal(wakes(harness.dispatched).length, 1);
 
+    harness.state.run = { id: "run_2", status: "completed" };
     harness.state.questions = [question("q_2", "Also drop the legacy route?")];
     yield* watch.sweep;
     assert.include(wakes(harness.dispatched)[1]?.text, "Question q_2:");
