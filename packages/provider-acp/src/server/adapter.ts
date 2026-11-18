@@ -240,6 +240,11 @@ export interface AcpAdapterV2ExtensionContext {
     readonly sessionId: string;
     readonly failure: OrchestrationV2ProviderFailure;
   }) => Effect.Effect<void>;
+  /** Shows a provider setup phase (e.g. "Starting sandbox") until the next phase, `null`, or turn end. */
+  readonly reportRunPhase: (notice: {
+    readonly sessionId: string;
+    readonly label: string | null;
+  }) => Effect.Effect<void>;
   readonly finishSubagent: (notice: {
     readonly sessionId: string;
     readonly childSessionId: string;
@@ -1479,6 +1484,9 @@ interface ActiveAcpTurn {
         readonly startedAt: DateTime.Utc;
         readonly itemOrdinal: number;
       }
+    | undefined;
+  runPhase?:
+    | { readonly nativeItemId: string; readonly label: string; readonly startedAt: DateTime.Utc }
     | undefined;
   contextUsage: ThreadTokenUsageSnapshot | null;
   nativeMetadata: OrchestrationV2ProviderThreadNativeMetadata | null;
@@ -4635,6 +4643,64 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           });
         });
 
+        const emitRunPhase = Effect.fnUntraced(function* (
+          context: ActiveAcpTurn,
+          status: "running" | "completed",
+        ) {
+          const phase = context.runPhase;
+          if (phase === undefined) return;
+          const now = yield* DateTime.now;
+          yield* emitProviderEvent({
+            type: "turn_item.updated",
+            driver,
+            turnItem: {
+              id: providerTurnItemId(phase.nativeItemId),
+              threadId: context.input.threadId,
+              runId: context.input.runId,
+              nodeId: context.input.rootNodeId,
+              providerThreadId: context.input.providerThread.id,
+              providerTurnId: context.providerTurnId,
+              nativeItemRef: { driver, nativeId: phase.nativeItemId, strength: "weak" },
+              parentItemId: null,
+              ordinal: yield* resolveItemOrdinal(context, phase.nativeItemId),
+              type: "system_notice",
+              status,
+              title: phase.label,
+              message: phase.label,
+              level: "info",
+              startedAt: phase.startedAt,
+              completedAt: status === "completed" ? now : null,
+              updatedAt: now,
+            },
+          });
+          if (status === "completed") context.runPhase = undefined;
+        });
+
+        const reportRunPhase = Effect.fnUntraced(function* (notice: {
+          readonly sessionId: string;
+          readonly label: string | null;
+        }) {
+          const context = yield* Ref.get(activeTurn);
+          if (
+            context === null ||
+            context.finalized ||
+            context.interrupted ||
+            context.nativeThreadId !== notice.sessionId ||
+            (yield* Ref.get(stoppedRunQuarantine))
+          )
+            return;
+          const label = notice.label?.trim() ?? "";
+          if (context.runPhase?.label === label) return;
+          yield* emitRunPhase(context, "completed");
+          if (label.length === 0) return;
+          context.runPhase = {
+            nativeItemId: `${context.nativeTurnId}:phase:${context.itemOrdinals.size}`,
+            label,
+            startedAt: yield* DateTime.now,
+          };
+          yield* emitRunPhase(context, "running");
+        });
+
         const emitPlan = Effect.fnUntraced(function* (
           context: ActiveAcpTurn,
           update: AcpPlanUpdate,
@@ -7172,6 +7238,10 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 runRuntimeCallbackAtGeneration(handlerGeneration, reportProviderRetry(notice)).pipe(
                   Effect.asVoid,
                 ),
+              reportRunPhase: (notice) =>
+                runRuntimeCallbackAtGeneration(handlerGeneration, reportRunPhase(notice)).pipe(
+                  Effect.asVoid,
+                ),
               requestUserInput,
               captureProposedPlan,
               lastProposedPlanMarkdown,
@@ -8090,6 +8160,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               discard: true,
             }),
           );
+          yield* emitRunPhase(context, "completed");
           if (settledStatus !== "failed") {
             yield* emitProviderRetry(context, settledStatus);
           }

@@ -357,12 +357,19 @@ export function acpRegistryProbeFailure(
   const detail = error._tag === "AcpTransportError" && error.detail ? error.detail : error.message;
   const authenticationFailed =
     (error._tag === "AcpRequestError" && error.code === -32000) ||
-    /\b(?:authenticat(?:e|ed|es|ing|ion)|credentials?|log(?:[\s-]+)?in)\b/iu.test(detail);
+    /\b(?:authenticat(?:e|ed|es|ing|ion)|credentials?|log(?:[\s-]+)?in|sign(?:ed|ing)?[\s-]+in)\b/iu.test(
+      detail,
+    );
+  // Agents explain setup problems (e.g. an unlinked project) in the request error.
+  const agentMessage =
+    error._tag === "AcpRequestError" ? error.errorMessage.trim().slice(0, 500) : "";
   return new AcpRegistryOperationError({
     reason: authenticationFailed ? "authentication_failed" : "probe_failed",
     message: authenticationFailed
       ? "The ACP agent could not complete authentication."
-      : "The ACP agent could not create a test session.",
+      : agentMessage.length > 0
+        ? `The ACP agent could not create a test session: ${agentMessage}`
+        : "The ACP agent could not create a test session.",
     cause: error,
     ...(authMethods.length > 0 ? { authMethods } : {}),
     ...(authAction === undefined ? {} : { authAction }),

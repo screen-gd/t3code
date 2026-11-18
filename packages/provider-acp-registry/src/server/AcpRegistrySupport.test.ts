@@ -414,6 +414,7 @@ describe("AcpRegistrySupport", () => {
           status: "missing_runner",
           version: null,
           distribution: "local",
+          command: commandPath,
         });
         expect(
           yield* resolver.resolve(localSettings, "/workspace", environment).pipe(Effect.flip),

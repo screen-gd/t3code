@@ -377,6 +377,8 @@ function sanitizeAcpToolCallContent(
           path: entry.path,
           ...(entry.oldText !== undefined ? { oldText: entry.oldText } : {}),
           newText: entry.newText,
+          // Agents mark partial or truncated text here; flavors read it.
+          ...(entry._meta == null ? {} : { _meta: entry._meta }),
         };
       case "terminal":
         return { type: "terminal", terminalId: entry.terminalId };

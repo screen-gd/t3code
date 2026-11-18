@@ -511,5 +511,23 @@ describe("ACP Registry probe", () => {
         }),
       ).reason,
     ).toBe("probe_failed");
+    expect(
+      acpRegistryProbeFailure(
+        new EffectAcpErrors.AcpRequestError({
+          code: -32603,
+          errorMessage: "Could not find the Hoplite project for /home/user.",
+        }),
+      ).message,
+    ).toBe(
+      "The ACP agent could not create a test session: Could not find the Hoplite project for /home/user.",
+    );
+    expect(
+      acpRegistryProbeFailure(
+        new EffectAcpErrors.AcpRequestError({
+          code: -32603,
+          errorMessage: "finish signing in in the browser window that opened",
+        }),
+      ).reason,
+    ).toBe("authentication_failed");
   });
 });

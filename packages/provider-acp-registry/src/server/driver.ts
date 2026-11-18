@@ -248,7 +248,7 @@ function acpRegistrySnapshotReadiness(
         status: "error",
         message:
           inspection.distribution === "local"
-            ? "Local ACP executable is not available on this environment's PATH."
+            ? `Local ACP executable '${inspection.command}' is not available on this environment's PATH.`
             : `ACP executable '${inspection.runner}' is not available on this environment's PATH.`,
       };
     case "unprepared":
