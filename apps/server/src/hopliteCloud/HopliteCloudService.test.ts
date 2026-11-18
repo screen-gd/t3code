@@ -54,6 +54,20 @@ const makeHarness = () => {
     if (request.headers.authorization !== `Bearer ${GOOD_KEY}`) {
       return respond(401, { ok: false, error: "unauthorized" });
     }
+    if (url.pathname === "/api/source-control/github/repositories") {
+      return respond(200, {
+        ok: true,
+        repositories: [
+          { id: "repo_9", fullName: "Acme/Shop", defaultBranch: "main", private: true },
+        ],
+      });
+    }
+    if (request.method === "POST" && url.pathname === "/api/projects") {
+      return respond(201, {
+        ok: true,
+        project: { id: "prj_new", name: "Shop", previewPort: 3000 },
+      });
+    }
     if (url.pathname === "/api/projects") {
       return Option.isNone(UrlParams.getFirst(request.urlParams, "cursor"))
         ? respond(200, {
@@ -63,7 +77,14 @@ const makeHarness = () => {
           })
         : respond(200, {
             ok: true,
-            projects: [{ id: "prj_2", name: "API", previewPort: 3000 }],
+            projects: [
+              {
+                id: "prj_2",
+                name: "API",
+                previewPort: 3000,
+                repos: [{ repoFullName: "acme/api", branch: "main" }],
+              },
+            ],
             nextCursor: null,
           });
     }
@@ -156,6 +177,35 @@ it.effect("connecting lists every project page and starts tasks in the default p
     assert.deepStrictEqual(create?.body, { projectId: "prj_2", prompt: "Fix login" });
     // Hoplite replays a write with the same key instead of starting a second thread.
     assert.equal(create?.headers["idempotency-key"], "t3code:req-1");
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a task naming a repo uses the project that has it, or creates one", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const hoplite = yield* HopliteCloud.HopliteCloud;
+    yield* hoplite.connect(GOOD_KEY);
+    const threadBodies = () =>
+      harness.sent
+        .filter((request) => request.method === "POST" && request.path === "/api/threads")
+        .map((request) => request.body);
+
+    yield* hoplite.startTask({ prompt: "Fix login", repo: "https://github.com/Acme/API.git" });
+    assert.deepStrictEqual(threadBodies().at(-1), { projectId: "prj_2", prompt: "Fix login" });
+    assert.isFalse(harness.sent.some((request) => request.path.startsWith("/api/source-control")));
+
+    yield* hoplite.startTask({ prompt: "Fix cart", repo: "acme/shop" });
+    const created = harness.sent.find(
+      (request) => request.method === "POST" && request.path === "/api/projects",
+    );
+    assert.deepStrictEqual(created?.body, { name: "Shop", repositoryId: "repo_9" });
+    assert.equal(created?.headers["idempotency-key"], "t3code:project:repo_9");
+    assert.deepStrictEqual(threadBodies().at(-1), { projectId: "prj_new", prompt: "Fix cart" });
+
+    assert.equal(
+      yield* errorCode(hoplite.startTask({ prompt: "Fix it", repo: "acme/private" })),
+      "repo_unavailable",
+    );
   }).pipe(Effect.provide(harness.layer));
 });
 

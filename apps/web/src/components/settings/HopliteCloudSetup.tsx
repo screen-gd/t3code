@@ -164,8 +164,8 @@ export function HopliteCloudSetup() {
         </Select>
       </div>
       <p className="text-xs text-muted-foreground">
-        Agents can hand a task to a Hoplite cloud thread in the default project. Each thread runs in
-        its own sandbox with that project's repository.
+        Agents name the GitHub repo to work in, and Hoplite uses the project that has it, creating
+        one when none does. The default project is only for tasks that name no repo.
       </p>
       {errorAlert}
       <div className="flex justify-end">

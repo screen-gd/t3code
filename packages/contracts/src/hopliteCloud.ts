@@ -67,6 +67,8 @@ export const HopliteCloudStartTaskInput = Schema.Struct({
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
   title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   projectId: Schema.optional(HopliteId),
+  /** A GitHub `owner/name`; picks the Hoplite project with it, creating one when none has it. */
+  repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /** Makes retries create one thread. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
@@ -113,6 +115,7 @@ export const HopliteCloudErrorCode = Schema.Literals([
   "forbidden",
   "not_found",
   "project_required",
+  "repo_unavailable",
   "rate_limited",
   "unavailable",
 ]);

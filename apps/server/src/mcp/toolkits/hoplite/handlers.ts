@@ -12,7 +12,7 @@ const toFailure = (error: HopliteCloudError) =>
     code:
       error.code === "not_found"
         ? "task_not_found"
-        : error.code === "project_required"
+        : error.code === "project_required" || error.code === "repo_unavailable"
           ? "target_required"
           : "provider_unavailable",
     message: error.message,
@@ -27,7 +27,7 @@ const callerThreadId = Effect.map(
 const handlers = {
   // These spend the controller's Hoplite key, so read-only clients and linked environments may not.
   hoplite_task: McpToolAccess.writesWithCapability(
-    ({ threadId, prompt, title, projectId, clientRequestId }) =>
+    ({ threadId, prompt, title, projectId, repo, clientRequestId }) =>
       Effect.all([HopliteTaskWatch.HopliteTaskWatch, callerThreadId]).pipe(
         Effect.flatMap(([watch, caller]) =>
           threadId === undefined
@@ -36,6 +36,7 @@ const handlers = {
                   prompt,
                   ...(title === undefined ? {} : { title }),
                   ...(projectId === undefined ? {} : { projectId }),
+                  ...(repo === undefined ? {} : { repo }),
                   ...(clientRequestId === undefined ? {} : { clientRequestId }),
                 },
                 caller,

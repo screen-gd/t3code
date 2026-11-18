@@ -33,10 +33,29 @@ const REQUEST_TIMEOUT = "20 seconds";
 const MAX_PROJECT_PAGES = 10;
 const MAX_REPLY_LENGTH = 4_000;
 
+const ProjectRecord = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  repos: Schema.optional(Schema.Array(Schema.Struct({ repoFullName: Schema.String }))),
+});
 const ProjectsPage = Schema.Struct({
-  projects: Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String })),
+  projects: Schema.Array(ProjectRecord),
   nextCursor: Schema.optional(Schema.NullOr(Schema.String)),
 });
+
+const GitHubRepositories = Schema.Struct({
+  repositories: Schema.Array(Schema.Struct({ id: Schema.String, fullName: Schema.String })),
+});
+const CreatedProject = Schema.Struct({ project: Schema.Struct({ id: Schema.String }) });
+
+// Accepts `owner/name`, a GitHub URL, or a clone URL; GitHub names are case-insensitive.
+const normalizeRepo = (repo: string) =>
+  repo
+    .trim()
+    .replace(/^(?:https?:\/\/|git@)?github\.com[/:]/i, "")
+    .replace(/\.git$/i, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
 
 const ThreadRecord = Schema.Struct({
   id: Schema.String,
@@ -136,7 +155,10 @@ const MESSAGES: Record<HopliteCloudErrorCode, string> = {
   invalid_key: "Hoplite rejected the API key. Create a new key and connect again.",
   forbidden: "The Hoplite API key lacks the permission for this action.",
   not_found: "Hoplite has no such project or thread for this key.",
-  project_required: "Choose a Hoplite project, or set a default one in Settings > Environments.",
+  project_required:
+    "Name the GitHub repo (owner/name) to work in, or set a default Hoplite project in Settings > Environments.",
+  repo_unavailable:
+    "Hoplite's GitHub app cannot see that repository. Install it on the repository from Hoplite, then try again.",
   rate_limited: "Hoplite is rate limiting this key. Try again in a minute.",
   unavailable: "Hoplite could not be reached.",
 };
@@ -204,7 +226,7 @@ const make = Effect.gen(function* () {
     );
 
   const listProjects = Effect.fn("HopliteCloud.listProjects")(function* (apiKey: string) {
-    const projects: Array<HopliteCloudProject> = [];
+    const projects: Array<typeof ProjectRecord.Type> = [];
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PROJECT_PAGES; page++) {
       const request: HttpClientRequest.HttpClientRequest = HttpClientRequest.get(
@@ -217,7 +239,7 @@ const make = Effect.gen(function* () {
         }),
       );
       const result: typeof ProjectsPage.Type = yield* send(apiKey, request, ProjectsPage);
-      projects.push(...result.projects.map(({ id, name }) => ({ id, name })));
+      projects.push(...result.projects);
       cursor = result.nextCursor ?? null;
       if (cursor === null) break;
     }
@@ -229,7 +251,7 @@ const make = Effect.gen(function* () {
     return yield* listProjects(apiKey).pipe(
       Effect.map((projects): HopliteCloudStatus => ({
         connected: true,
-        projects,
+        projects: projects.map(({ id, name }): HopliteCloudProject => ({ id, name })),
         defaultProjectId: projects.some((project) => project.id === defaultProjectId)
           ? defaultProjectId
           : null,
@@ -327,12 +349,47 @@ const make = Effect.gen(function* () {
   const getTask = (input: HopliteCloudGetTaskInput) =>
     Effect.map(readTask(input), ({ task }) => task);
 
+  // Reuses the project that already has the repository, so its setup and secrets apply.
+  const projectForRepo = Effect.fn("HopliteCloud.projectForRepo")(function* (
+    apiKey: string,
+    repo: string,
+  ) {
+    const fullName = normalizeRepo(repo);
+    const projects = yield* listProjects(apiKey);
+    const existing = projects.find((project) =>
+      project.repos?.some((candidate) => normalizeRepo(candidate.repoFullName) === fullName),
+    );
+    if (existing !== undefined) return existing.id;
+    const { repositories } = yield* send(
+      apiKey,
+      HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/source-control/github/repositories`),
+      GitHubRepositories,
+    );
+    const repository = repositories.find(
+      (candidate) => normalizeRepo(candidate.fullName) === fullName,
+    );
+    if (repository === undefined) return yield* failure("repo_unavailable");
+    const request = HttpClientRequest.post(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
+      // Keyed by repository so two tasks starting at once create one project.
+      HttpClientRequest.setHeader("Idempotency-Key", `t3code:project:${repository.id}`),
+      HttpClientRequest.bodyJsonUnsafe({
+        name: repository.fullName.split("/").at(-1) ?? repository.fullName,
+        repositoryId: repository.id,
+      }),
+    );
+    const { project } = yield* send(apiKey, request, CreatedProject);
+    return project.id;
+  });
+
   const startTask = Effect.fn("HopliteCloud.startTask")(function* (
     input: HopliteCloudStartTaskInput,
   ) {
     const apiKey = yield* requireKey;
     const projectId =
-      input.projectId ?? Option.getOrUndefined(yield* readSecret(HOPLITE_DEFAULT_PROJECT_SECRET));
+      input.projectId ??
+      (input.repo === undefined
+        ? Option.getOrUndefined(yield* readSecret(HOPLITE_DEFAULT_PROJECT_SECRET))
+        : yield* projectForRepo(apiKey, input.repo));
     if (projectId === undefined) return yield* failure("project_required");
     const request = HttpClientRequest.post(`${HOPLITE_API_BASE_URL}/api/threads`).pipe(
       yield* idempotent(input.clientRequestId),
