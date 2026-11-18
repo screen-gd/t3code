@@ -1773,7 +1773,9 @@ const make = Effect.gen(function* () {
       childThreadId: null,
       ...(task.remoteChild === undefined
         ? {}
-        : { remoteChild: task.remoteChild, link: formatThreadLink(task.remoteChild) }),
+        : task.remoteChild.service !== undefined
+          ? { remoteChild: task.remoteChild }
+          : { remoteChild: task.remoteChild, link: formatThreadLink(task.remoteChild) }),
       childRunId: null,
       childNodeId: task.id,
       status,

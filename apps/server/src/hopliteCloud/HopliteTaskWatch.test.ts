@@ -1,15 +1,21 @@
 import { assert, it } from "@effect/vitest";
 import {
   type HopliteCloudTask,
+  NodeId,
+  type OrchestrationV2Run,
   type OrchestrationV2ServerCommand,
+  type OrchestrationV2Subagent,
+  RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
 import * as HopliteTaskWatch from "./HopliteTaskWatch.ts";
 
@@ -22,12 +28,23 @@ const task: HopliteCloudTask = {
   pullRequestUrl: null,
 };
 
+const activeRun = {
+  id: RunId.make("run:parent"),
+  ordinal: 1,
+  status: "running",
+  rootNodeId: NodeId.make("node:parent"),
+} as unknown as OrchestrationV2Run;
+
 // Hoplite's run-state for thr_1 is whatever `run` holds when the sweep reads it.
 const makeHarness = (stored = new Map<string, Uint8Array>()) => {
-  const state: { run: HopliteCloud.HopliteRun | null; reply: string | null } = {
-    run: null,
-    reply: null,
-  };
+  const state: {
+    run: HopliteCloud.HopliteRun | null;
+    reply: string | null;
+    /** The caller thread's runs; an active one gets a card. */
+    runs: ReadonlyArray<OrchestrationV2Run>;
+    cards: ReadonlyArray<OrchestrationV2Subagent>;
+    stops: number;
+  } = { run: null, reply: null, runs: [], cards: [], stops: 0 };
   const dispatched: Array<OrchestrationV2ServerCommand> = [];
   const layer = HopliteTaskWatch.layer.pipe(
     Layer.provide(
@@ -36,7 +53,7 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
         readTask: () =>
           Effect.sync(() => ({ task: { ...task, latestReply: state.reply }, run: state.run })),
         sendMessage: () => Effect.succeed({ runId: null }),
-        stopTask: () => Effect.succeed(task),
+        stopTask: () => Effect.sync(() => (state.stops++, task)),
       }),
     ),
     Layer.provide(
@@ -44,8 +61,27 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
         dispatch: (command) =>
           Effect.sync(() => {
             dispatched.push(command);
-            return { sequence: dispatched.length, storedEvents: [] };
+            const storedEvents =
+              command.type === "delegated_task.remote.request"
+                ? [{ event: { type: "subagent.updated", payload: { id: "node:card" } } }]
+                : [];
+            return { sequence: dispatched.length, storedEvents } as never;
           }),
+        getThreadRecords: () =>
+          Effect.sync(() => ({ runs: state.runs, subagents: state.cards }) as never),
+      }),
+    ),
+    Layer.provide(
+      Layer.succeed(
+        SecureRandom.SecureRandom,
+        SecureRandom.make((size) => new Uint8Array(size).fill(dispatched.length)),
+      ),
+    ),
+    Layer.provide(
+      Layer.mock(ProjectionStore.ProjectionStoreV2)({
+        getOpenRemoteDelegatedTasks: Effect.sync(() =>
+          state.cards.map((card) => ({ parentThreadId: card.threadId, taskId: card.id })),
+        ),
       }),
     ),
     Layer.provide(
@@ -93,6 +129,67 @@ it.effect("an agent's task wakes its thread once, when the run it started settle
         outcome: "completed",
       },
     ]);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect(
+  "a task started in a running turn is a card there, completed when its run settles",
+  () => {
+    const harness = makeHarness();
+    harness.state.runs = [activeRun];
+    return Effect.gen(function* () {
+      const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+      yield* watch.startTask({ prompt: "Fix login" }, "t3-thread");
+      const [request] = harness.dispatched;
+      assert.strictEqual(request?.type, "delegated_task.remote.request");
+      if (request?.type !== "delegated_task.remote.request") return;
+      assert.deepStrictEqual(request.remoteChild, {
+        environmentId: request.remoteChild.environmentId,
+        threadId: ThreadId.make("thr_1"),
+        label: "Hoplite",
+        service: "hoplite",
+        runId: RunId.make("run_1"),
+      });
+      assert.strictEqual(request.parentRunId, activeRun.id);
+
+      harness.state.run = { id: "run_1", status: "failed" };
+      yield* watch.sweep;
+      yield* watch.sweep;
+      assert.deepStrictEqual(wakes(harness.dispatched), []);
+      assert.deepStrictEqual(
+        harness.dispatched.flatMap((command) =>
+          command.type === "delegated_task.remote.complete"
+            ? [[command.taskId, command.status, command.stoppedThere]]
+            : [],
+        ),
+        [[NodeId.make("node:card"), "failed", "ran-out"]],
+      );
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect("a card cancelled in T3 stops its Hoplite task", () => {
+  const harness = makeHarness();
+  harness.state.cards = [
+    {
+      id: NodeId.make("node:card"),
+      threadId: ThreadId.make("t3-thread"),
+      status: "cancelled",
+      result: "Cancelled.",
+      remoteChild: { threadId: ThreadId.make("thr_1"), service: "hoplite" },
+    } as unknown as OrchestrationV2Subagent,
+  ];
+  return Effect.gen(function* () {
+    const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    yield* watch.sweep;
+    assert.strictEqual(harness.state.stops, 1);
+    const [complete] = harness.dispatched;
+    assert.strictEqual(complete?.type, "delegated_task.remote.complete");
+    if (complete?.type !== "delegated_task.remote.complete") return;
+    assert.deepStrictEqual(
+      [complete.status, complete.result, complete.stoppedThere],
+      ["cancelled", "Cancelled.", "stopped"],
+    );
   }).pipe(Effect.provide(harness.layer));
 });
 

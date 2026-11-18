@@ -878,6 +878,11 @@ export const OrchestrationV2RemoteTaskChild = Schema.Struct({
    * one owed, so each reaches the thread there once however often it is sent.
    */
   stopCount: Schema.optional(NonNegativeInt),
+  /**
+   * Runs in a cloud service instead of a linked environment: `environmentId`,
+   * `threadId` and `runId` then name it there, and no T3 thread opens for it.
+   */
+  service: Schema.optional(Schema.Literal("hoplite")),
 });
 export type OrchestrationV2RemoteTaskChild = typeof OrchestrationV2RemoteTaskChild.Type;
 

@@ -540,7 +540,8 @@ const make = Effect.gen(function* () {
   ) {
     const sequence = yield* threads.getThreadEventSequence(parentThreadId);
     const { thread, task } = yield* readTask(parentThreadId, taskId);
-    if (task?.remoteChild === undefined) return true;
+    // HopliteTaskWatch follows tasks that run in Hoplite.
+    if (task?.remoteChild === undefined || task.remoteChild.service !== undefined) return true;
     const remote = task.remoteChild;
     const scope = followScope(
       { threadId: parentThreadId, providerInstanceId: thread.providerInstanceId },
@@ -696,6 +697,30 @@ const make = Effect.gen(function* () {
         });
       }
       const { reason } = input;
+      if (remote.service !== undefined) {
+        // Its watcher stops it in the service once the task here is cancelled.
+        if (task.result === null) {
+          yield* complete(
+            task.threadId,
+            task.id,
+            "cancelled",
+            reason === undefined ? "Cancelled." : `Cancelled: ${reason}`,
+            undefined,
+          ).pipe(
+            Effect.mapError(
+              () =>
+                new OrchestratorMcpFailure({
+                  code: "orchestration_error",
+                  message: "Unable to record the cancellation.",
+                }),
+            ),
+          );
+        }
+        return {
+          taskId: task.id,
+          status: task.result === null ? "cancel_requested" : terminalStatus(task.status),
+        } satisfies OrchestratorMcpTaskCancelResult;
+      }
       const there = followScope(scope.thread, remote);
       // A later cancel stops what started there since; a retry of this one, nothing new.
       const key = `cancel:${encodeURIComponent(scope.requestNamespace)}:${

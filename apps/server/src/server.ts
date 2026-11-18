@@ -787,7 +787,12 @@ const layerMakeRoutes = Layer.mergeAll(
   McpHttpServer.layer.pipe(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     // Agents start Hoplite tasks with the key this server holds; Ws provides its own copy.
-    Layer.provide(HopliteTaskWatch.layer.pipe(Layer.provideMerge(HopliteCloud.layer))),
+    Layer.provide(
+      HopliteTaskWatch.layer.pipe(
+        Layer.provideMerge(HopliteCloud.layer),
+        Layer.provide(ProjectionStoreV2.layer),
+      ),
+    ),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
   // Follows delegated tasks running in linked environments, including after a restart.

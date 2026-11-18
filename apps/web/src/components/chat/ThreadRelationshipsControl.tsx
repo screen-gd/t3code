@@ -305,9 +305,11 @@ function RemoteSubagentRow(props: {
           <LineageTooltipContent
             title={title}
             hint={
-              environment === null
-                ? `Runs on ${remoteChild.label}. Connect to it to open the thread there.`
-                : `Open on ${remoteChild.label}`
+              remoteChild.service !== undefined
+                ? `Runs in ${remoteChild.label}. Its result appears here when it ends.`
+                : environment === null
+                  ? `Runs on ${remoteChild.label}. Connect to it to open the thread there.`
+                  : `Open on ${remoteChild.label}`
             }
           />
         </TooltipPopup>
