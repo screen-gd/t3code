@@ -1,6 +1,8 @@
 import { OrchestratorMcpFailure, type ServerSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Environment from "../../../environment/ServerEnvironment.ts";
+import * as HopliteCloud from "../../../hopliteCloud/HopliteCloudService.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as Settings from "../../../serverSettings.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
@@ -45,12 +47,21 @@ export const layer = McpToolAccess.toLayer(EnvironmentToolkit, {
     Effect.gen(function* () {
       const { descriptor, settings } = yield* access;
       const current = yield* settings.getSettings.pipe(Effect.mapError(unavailable));
+      // Agents asked to "open a thread in Hoplite" look for it here, as an environment.
+      const hoplite = yield* Effect.serviceOption(HopliteCloud.HopliteCloud);
+      const hopliteConnected = Option.isSome(hoplite) && (yield* hoplite.value.connected);
       return {
         environmentId: descriptor.environmentId,
         label: descriptor.label,
         serverVersion: descriptor.serverVersion,
         platform: descriptor.platform,
         preferences: preferences(current),
+        ...(hopliteConnected
+          ? {
+              hopliteCloud:
+                "Connected. Hoplite runs tasks in its own cloud sandboxes, not as a linked environment: start one with hoplite_task.",
+            }
+          : {}),
       };
     }),
   ),

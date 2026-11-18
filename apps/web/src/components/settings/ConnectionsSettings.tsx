@@ -136,6 +136,7 @@ import {
   SavedBackendListRow,
 } from "./SavedEnvironmentRows";
 import { AddEnvironmentDialog } from "./AddEnvironmentDialog";
+import { HopliteCloudRow } from "./HopliteCloudSetup";
 
 const DEFAULT_TAILSCALE_SERVE_PORT = 443;
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = [];
@@ -1514,6 +1515,12 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
             }}
           />
         ))}
+        <HopliteCloudRow
+          onManage={() => {
+            setSavedBackendError(null);
+            setAddBackendDialogOpen(true);
+          }}
+        />
         <CloudRemoteEnvironmentRows
           primaryEnvironmentId={primaryEnvironmentId}
           savedEnvironments={savedEnvironments}

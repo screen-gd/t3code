@@ -49,6 +49,8 @@ const EnvironmentReadTool = Tool.make("t3_environment_read", {
     serverVersion: Schema.String,
     platform: ExecutionEnvironmentDescriptor.fields.platform,
     preferences: Schema.Struct(PreferenceFields),
+    /** Present when Hoplite cloud is connected here. */
+    hopliteCloud: Schema.optional(Schema.String),
   }),
 })
   .annotate(Tool.Readonly, true)

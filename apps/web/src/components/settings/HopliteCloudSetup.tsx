@@ -14,6 +14,7 @@ import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { SettingsRow } from "./settingsLayout";
 
 const NO_DEFAULT_PROJECT = "__none__";
 
@@ -168,5 +169,33 @@ export function HopliteCloudSetup() {
         </Button>
       </div>
     </div>
+  );
+}
+
+/** Lists a connected Hoplite under Environments, where users look for it after connecting. */
+export function HopliteCloudRow({ onManage }: { readonly onManage: () => void }) {
+  const environmentId = usePrimaryEnvironmentId();
+  const canEdit = useAtomValue(hopliteCloudEnvironment.connect.permissionAtom(environmentId));
+  const query = useEnvironmentQuery(
+    environmentId !== null && canEdit
+      ? hopliteCloudEnvironment.status({ environmentId, input: {} })
+      : null,
+  );
+  const status = query.data;
+  if (status === null || !status.connected) return null;
+  const project = status.projects.find((candidate) => candidate.id === status.defaultProjectId);
+  return (
+    <SettingsRow
+      title="Hoplite cloud"
+      description={
+        status.problem ??
+        `Ask an agent to run a task in Hoplite. It runs in a cloud sandbox${project ? ` with ${project.name}` : ""} and reports back to the thread.`
+      }
+      control={
+        <Button size="sm" variant="outline" onClick={onManage}>
+          Manage
+        </Button>
+      }
+    />
   );
 }

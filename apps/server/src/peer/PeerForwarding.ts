@@ -84,7 +84,7 @@ export class PeerForwarding extends Context.Service<
 export const linkedEnvironmentsOff = new OrchestratorMcpFailure({
   code: "capability_denied",
   message:
-    "Linked environments is off on this machine, so no tool can act on another machine. Leave out environmentId to work here; the user can turn it on in Settings → Labs.",
+    "Linked environments is off on this machine, so no tool can act on another machine. Leave out environmentId to work here; the user can turn it on in Settings → Labs. Hoplite cloud is not a linked environment: use hoplite_task.",
 });
 
 /** The linked environment a call names, or nothing when it names this one. */

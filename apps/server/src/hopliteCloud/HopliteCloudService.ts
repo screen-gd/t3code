@@ -102,6 +102,8 @@ export class HopliteCloud extends Context.Service<
   HopliteCloud,
   {
     readonly status: Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
+    /** Whether a key is stored, without asking Hoplite. */
+    readonly connected: Effect.Effect<boolean>;
     readonly connect: (apiKey: string) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly disconnect: Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly setDefaultProject: (
@@ -390,8 +392,14 @@ const make = Effect.gen(function* () {
     } satisfies HopliteCloudPreview;
   });
 
+  const connected = readSecret(HOPLITE_API_KEY_SECRET).pipe(
+    Effect.map(Option.isSome),
+    Effect.orElseSucceed(() => false),
+  );
+
   return HopliteCloud.of({
     status,
+    connected,
     connect,
     disconnect,
     setDefaultProject,
