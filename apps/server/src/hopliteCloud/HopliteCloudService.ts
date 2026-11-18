@@ -2,7 +2,10 @@ import {
   HopliteCloudError,
   type HopliteCloudErrorCode,
   type HopliteCloudGetTaskInput,
+  HopliteCloudPreview,
+  type HopliteCloudPreviewInput,
   type HopliteCloudProject,
+  type HopliteCloudSendMessageInput,
   type HopliteCloudSetDefaultProjectInput,
   type HopliteCloudStartTaskInput,
   type HopliteCloudStatus,
@@ -43,16 +46,57 @@ const ThreadRecord = Schema.Struct({
   pullRequests: Schema.optional(Schema.Array(Schema.Struct({ url: Schema.String }))),
 });
 const ThreadResponse = Schema.Struct({ thread: ThreadRecord });
+const StartedRun = Schema.optional(Schema.NullOr(Schema.Struct({ id: Schema.String })));
+const CreateThreadResponse = Schema.Struct({ thread: ThreadRecord, run: StartedRun });
+const AppendMessageResponse = Schema.Struct({ run: StartedRun });
+const StopResponse = Schema.Struct({ ok: Schema.Boolean });
+
+const RunStatus = Schema.Literals([
+  "queued",
+  "running",
+  "waiting",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type HopliteRunStatus = typeof RunStatus.Type;
 
 const RunStateResponse = Schema.Struct({
   run: Schema.optional(
     Schema.NullOr(
       Schema.Struct({
+        runId: Schema.String,
+        status: RunStatus,
         assistantMessage: Schema.optional(Schema.NullOr(Schema.Struct({ content: Schema.String }))),
       }),
     ),
   ),
 });
+
+const PreviewResponse = Schema.Struct({
+  preview: Schema.Struct({
+    status: HopliteCloudPreview.fields.status,
+    url: Schema.optional(Schema.String),
+    reason: Schema.optional(Schema.String),
+  }),
+});
+
+/** The thread's latest run, which `run-state` reports and `stop` must name. */
+export interface HopliteRun {
+  readonly id: string;
+  readonly status: HopliteRunStatus;
+}
+
+export interface HopliteTaskRead {
+  readonly task: HopliteCloudTask;
+  readonly run: HopliteRun | null;
+}
+
+export interface HopliteStartedTask {
+  readonly task: HopliteCloudTask;
+  /** Absent while Hoplite still prepares the thread. */
+  readonly runId: string | null;
+}
 
 export class HopliteCloud extends Context.Service<
   HopliteCloud,
@@ -65,10 +109,23 @@ export class HopliteCloud extends Context.Service<
     ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly startTask: (
       input: HopliteCloudStartTaskInput,
-    ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
+    ) => Effect.Effect<HopliteStartedTask, HopliteCloudError>;
     readonly getTask: (
       input: HopliteCloudGetTaskInput,
     ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
+    readonly readTask: (
+      input: HopliteCloudGetTaskInput,
+    ) => Effect.Effect<HopliteTaskRead, HopliteCloudError>;
+    /** Returns the run the message started, or null when it waits behind the active one. */
+    readonly sendMessage: (
+      input: HopliteCloudSendMessageInput,
+    ) => Effect.Effect<{ readonly runId: string | null }, HopliteCloudError>;
+    readonly stopTask: (
+      input: HopliteCloudGetTaskInput,
+    ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
+    readonly preview: (
+      input: HopliteCloudPreviewInput,
+    ) => Effect.Effect<HopliteCloudPreview, HopliteCloudError>;
   }
 >()("t3/hopliteCloud/HopliteCloudService/HopliteCloud") {}
 
@@ -235,20 +292,38 @@ const make = Effect.gen(function* () {
     return yield* statusFor(apiKey);
   });
 
-  const getTask = Effect.fn("HopliteCloud.getTask")(function* ({
+  const threadPath = (threadId: string) =>
+    `${HOPLITE_API_BASE_URL}/api/threads/${encodeURIComponent(threadId)}`;
+  const idempotent = (clientRequestId: string | undefined) =>
+    Effect.map(
+      clientRequestId === undefined ? random.uuidV4() : Effect.succeed(clientRequestId),
+      (key) => HttpClientRequest.setHeader("Idempotency-Key", `t3code:${key}`),
+    );
+  // A thread still preparing its sandbox has no run yet, so its run is simply absent.
+  const readRunState = (apiKey: string, threadId: string) =>
+    send(apiKey, HttpClientRequest.get(`${threadPath(threadId)}/run-state`), RunStateResponse).pipe(
+      Effect.option,
+      Effect.map((state) => Option.getOrUndefined(state)?.run ?? null),
+    );
+
+  const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
     const apiKey = yield* requireKey;
-    const path = `${HOPLITE_API_BASE_URL}/api/threads/${encodeURIComponent(threadId)}`;
-    const { thread } = yield* send(apiKey, HttpClientRequest.get(path), ThreadResponse);
-    // A thread still preparing its sandbox has no run yet, so its reply is simply absent.
-    const runState = yield* send(
+    const { thread } = yield* send(
       apiKey,
-      HttpClientRequest.get(`${path}/run-state`),
-      RunStateResponse,
-    ).pipe(Effect.option);
-    return toTask(thread, Option.getOrUndefined(runState));
+      HttpClientRequest.get(threadPath(threadId)),
+      ThreadResponse,
+    );
+    const run = yield* readRunState(apiKey, threadId);
+    return {
+      task: toTask(thread, run?.assistantMessage?.content ?? null),
+      run: run === null ? null : { id: run.runId, status: run.status },
+    } satisfies HopliteTaskRead;
   });
+
+  const getTask = (input: HopliteCloudGetTaskInput) =>
+    Effect.map(readTask(input), ({ task }) => task);
 
   const startTask = Effect.fn("HopliteCloud.startTask")(function* (
     input: HopliteCloudStartTaskInput,
@@ -257,27 +332,79 @@ const make = Effect.gen(function* () {
     const projectId =
       input.projectId ?? Option.getOrUndefined(yield* readSecret(HOPLITE_DEFAULT_PROJECT_SECRET));
     if (projectId === undefined) return yield* failure("project_required");
-    const idempotencyKey = input.clientRequestId ?? (yield* random.uuidV4());
     const request = HttpClientRequest.post(`${HOPLITE_API_BASE_URL}/api/threads`).pipe(
-      HttpClientRequest.setHeader("Idempotency-Key", `t3code:${idempotencyKey}`),
+      yield* idempotent(input.clientRequestId),
       HttpClientRequest.bodyJsonUnsafe({
         projectId,
         prompt: input.prompt,
         ...(input.title === undefined ? {} : { title: input.title }),
       }),
     );
-    const { thread } = yield* send(apiKey, request, ThreadResponse);
-    return toTask(thread, undefined);
+    const { thread, run } = yield* send(apiKey, request, CreateThreadResponse);
+    return { task: toTask(thread, null), runId: run?.id ?? null } satisfies HopliteStartedTask;
   });
 
-  return HopliteCloud.of({ status, connect, disconnect, setDefaultProject, startTask, getTask });
+  const sendMessage = Effect.fn("HopliteCloud.sendMessage")(function* (
+    input: HopliteCloudSendMessageInput,
+  ) {
+    const apiKey = yield* requireKey;
+    const request = HttpClientRequest.post(`${threadPath(input.threadId)}/messages`).pipe(
+      yield* idempotent(input.clientRequestId),
+      HttpClientRequest.bodyJsonUnsafe({ content: input.message }),
+    );
+    const { run } = yield* send(apiKey, request, AppendMessageResponse);
+    return { runId: run?.id ?? null };
+  });
+
+  const stopTask = Effect.fn("HopliteCloud.stopTask")(function* ({
+    threadId,
+  }: HopliteCloudGetTaskInput) {
+    const apiKey = yield* requireKey;
+    // Hoplite stops only the run it is told to, so a run that finished meanwhile is never touched.
+    const run = yield* readRunState(apiKey, threadId);
+    if (run !== null && ["queued", "running", "waiting"].includes(run.status)) {
+      const request = HttpClientRequest.post(`${threadPath(threadId)}/stop`).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ runId: run.runId }),
+      );
+      yield* send(apiKey, request, StopResponse);
+    }
+    return yield* getTask({ threadId });
+  });
+
+  const preview = Effect.fn("HopliteCloud.preview")(function* ({
+    threadId,
+    start,
+  }: HopliteCloudPreviewInput) {
+    const apiKey = yield* requireKey;
+    const request =
+      start === true
+        ? HttpClientRequest.post(`${threadPath(threadId)}/preview/start`).pipe(
+            yield* idempotent(undefined),
+          )
+        : HttpClientRequest.get(`${threadPath(threadId)}/preview`);
+    const { preview } = yield* send(apiKey, request, PreviewResponse);
+    return {
+      status: preview.status,
+      url: preview.url ?? null,
+      reason: preview.reason ?? null,
+    } satisfies HopliteCloudPreview;
+  });
+
+  return HopliteCloud.of({
+    status,
+    connect,
+    disconnect,
+    setDefaultProject,
+    startTask,
+    getTask,
+    readTask,
+    sendMessage,
+    stopTask,
+    preview,
+  });
 });
 
-function toTask(
-  thread: typeof ThreadRecord.Type,
-  runState: typeof RunStateResponse.Type | undefined,
-): HopliteCloudTask {
-  const reply = runState?.run?.assistantMessage?.content ?? null;
+function toTask(thread: typeof ThreadRecord.Type, reply: string | null): HopliteCloudTask {
   return {
     threadId: thread.id,
     projectId: thread.projectId,

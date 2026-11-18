@@ -56,6 +56,13 @@ export const HopliteCloudTask = Schema.Struct({
 });
 export type HopliteCloudTask = typeof HopliteCloudTask.Type;
 
+export const HopliteCloudTaskResult = Schema.Struct({
+  ...HopliteCloudTask.fields,
+  /** What the agent should do next, such as end its turn because completion wakes it. */
+  next: Schema.optional(Schema.String),
+});
+export type HopliteCloudTaskResult = typeof HopliteCloudTaskResult.Type;
+
 export const HopliteCloudStartTaskInput = Schema.Struct({
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
   title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
@@ -67,6 +74,38 @@ export type HopliteCloudStartTaskInput = typeof HopliteCloudStartTaskInput.Type;
 
 export const HopliteCloudGetTaskInput = Schema.Struct({ threadId: HopliteId });
 export type HopliteCloudGetTaskInput = typeof HopliteCloudGetTaskInput.Type;
+
+export const HopliteCloudSendMessageInput = Schema.Struct({
+  threadId: HopliteId,
+  message: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+  /** Makes retries send one message. */
+  clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+});
+export type HopliteCloudSendMessageInput = typeof HopliteCloudSendMessageInput.Type;
+
+export const HopliteCloudPreviewInput = Schema.Struct({
+  threadId: HopliteId,
+  /** Start the thread's preview server when it is not running. */
+  start: Schema.optional(Schema.Boolean),
+});
+export type HopliteCloudPreviewInput = typeof HopliteCloudPreviewInput.Type;
+
+export const HopliteCloudPreview = Schema.Struct({
+  status: Schema.Literals([
+    "ready",
+    "unsupported",
+    "reconciling",
+    "blocked",
+    "starting",
+    "stopped",
+    "crashed",
+    "inactive",
+  ]),
+  /** Gateway access tokens for it stay with the server. */
+  url: Schema.NullOr(Schema.String),
+  reason: Schema.NullOr(Schema.String),
+});
+export type HopliteCloudPreview = typeof HopliteCloudPreview.Type;
 
 export const HopliteCloudErrorCode = Schema.Literals([
   "not_connected",

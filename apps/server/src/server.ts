@@ -72,6 +72,7 @@ import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrid
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
+import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
@@ -786,7 +787,7 @@ const layerMakeRoutes = Layer.mergeAll(
   McpHttpServer.layer.pipe(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
     // Agents start Hoplite tasks with the key this server holds; Ws provides its own copy.
-    Layer.provide(HopliteCloud.layer),
+    Layer.provide(HopliteTaskWatch.layer.pipe(Layer.provideMerge(HopliteCloud.layer))),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
   // Follows delegated tasks running in linked environments, including after a restart.

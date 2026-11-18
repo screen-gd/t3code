@@ -68,7 +68,26 @@ const makeHarness = () => {
           });
     }
     if (request.method === "POST" && url.pathname === "/api/threads") {
-      return respond(201, { ok: true, thread: { ...thread, status: "queued", pullRequests: [] } });
+      return respond(201, {
+        ok: true,
+        thread: { ...thread, status: "queued", pullRequests: [] },
+        run: { id: "run_1", status: "queued" },
+      });
+    }
+    if (request.method === "POST" && url.pathname === "/api/threads/thr_1/messages") {
+      return respond(201, { ok: true, message: { id: "msg_2" }, run: { id: "run_2" } });
+    }
+    if (request.method === "POST" && url.pathname === "/api/threads/thr_1/stop") {
+      return respond(202, { ok: true, result: { threadId: "thr_1", status: "cancelled" } });
+    }
+    if (url.pathname === "/api/threads/thr_1/preview") {
+      return respond(200, { ok: true, preview: { name: "web", status: "stopped", port: 3000 } });
+    }
+    if (url.pathname === "/api/threads/thr_1/preview/start") {
+      return respond(200, {
+        ok: true,
+        preview: { name: "web", status: "starting", port: 3000, url: "https://web.preview.test" },
+      });
     }
     if (url.pathname === "/api/threads/thr_1") return respond(200, { ok: true, thread });
     if (url.pathname === "/api/threads/thr_1/run-state") {
@@ -127,8 +146,12 @@ it.effect("connecting lists every project page and starts tasks in the default p
     const status = yield* hoplite.setDefaultProject({ projectId: "prj_2" });
     assert.equal(status.defaultProjectId, "prj_2");
 
-    const task = yield* hoplite.startTask({ prompt: "Fix login", clientRequestId: "req-1" });
+    const { task, runId } = yield* hoplite.startTask({
+      prompt: "Fix login",
+      clientRequestId: "req-1",
+    });
     assert.equal(task.status, "queued");
+    assert.equal(runId, "run_1");
     const create = harness.sent.find((request) => request.method === "POST");
     assert.deepStrictEqual(create?.body, { projectId: "prj_2", prompt: "Fix login" });
     // Hoplite replays a write with the same key instead of starting a second thread.
@@ -165,5 +188,38 @@ it.effect("a saved key that stops working stays connected and says why", () => {
     assert.match(status.problem ?? "", /rejected the API key/);
     yield* hoplite.disconnect;
     assert.isFalse(harness.stored.has(HopliteCloud.HOPLITE_API_KEY_SECRET));
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a task takes follow-ups, stops its active run, and reports its preview", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const hoplite = yield* HopliteCloud.HopliteCloud;
+    yield* hoplite.connect(GOOD_KEY);
+    const sent = yield* hoplite.sendMessage({
+      threadId: "thr_1",
+      message: "Also fix signup",
+      clientRequestId: "req-2",
+    });
+    assert.deepStrictEqual(sent, { runId: "run_2" });
+    const message = harness.sent.find((request) => request.path.endsWith("/messages"));
+    assert.deepStrictEqual(message?.body, { content: "Also fix signup" });
+    assert.equal(message?.headers["idempotency-key"], "t3code:req-2");
+
+    yield* hoplite.stopTask({ threadId: "thr_1" });
+    // Hoplite stops only a named run: the one run-state reported as running.
+    const stop = harness.sent.find((request) => request.path.endsWith("/stop"));
+    assert.deepStrictEqual(stop?.body, { runId: "run_1" });
+
+    assert.deepStrictEqual(yield* hoplite.preview({ threadId: "thr_1" }), {
+      status: "stopped",
+      url: null,
+      reason: null,
+    });
+    assert.deepStrictEqual(yield* hoplite.preview({ threadId: "thr_1", start: true }), {
+      status: "starting",
+      url: "https://web.preview.test",
+      reason: null,
+    });
   }).pipe(Effect.provide(harness.layer));
 });
