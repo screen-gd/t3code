@@ -238,10 +238,10 @@ For Antigravity's Google callback on a remote host, see
 
 ## Hoplite cloud tasks
 
-Open **Settings → Environments → Add environment**, choose **Hoplite cloud**,
-and paste a [Hoplite](https://hoplite.sh) service account key with project read
-and thread write access. The key stays on the machine running T3 Code; clients
-and agents never see it. Pick a default project there.
+Open **Settings → Environments → Add environment**, choose **Hoplite**, and
+paste a [Hoplite](https://hoplite.sh) API key from **Settings → Workspace → API
+keys** there. The key stays on the machine running T3 Code; clients and agents
+never see it.
 
 Agents can then hand a task to a Hoplite cloud thread, which runs in its own
 sandbox with that project's repository, and check its status and pull request

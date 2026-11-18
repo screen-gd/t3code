@@ -118,9 +118,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: AuthOrchestrationOperateScope,
   [WS_METHODS.cloudGetRelayClientStatus]: AuthRelayReadScope,
   [WS_METHODS.cloudInstallRelayClient]: AuthRelayWriteScope,
-  // Status lists the controller's Hoplite projects, which only settings writers manage.
+  // Status reveals whether the controller's Hoplite key works, which settings writers manage.
   [WS_METHODS.hopliteCloudGetStatus]: AuthSettingsWriteScope,
-  [WS_METHODS.hopliteCloudGetTask]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsListStats]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsFilterOptions]: AuthOrchestrationReadScope,

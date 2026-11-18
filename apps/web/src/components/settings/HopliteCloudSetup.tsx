@@ -13,7 +13,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import {
   Dialog,
   DialogDescription,
@@ -25,8 +24,6 @@ import {
 } from "../ui/dialog";
 import { HopliteIcon } from "../Icons";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
-
-const NO_DEFAULT_PROJECT = "__none__";
 
 /**
  * Hoplite runs agents in cloud sandboxes. This machine keeps the API key and
@@ -42,9 +39,6 @@ export function HopliteCloudSetup() {
   );
   const connect = useAtomCommand(hopliteCloudEnvironment.connect, { reportFailure: false });
   const disconnect = useAtomCommand(hopliteCloudEnvironment.disconnect, { reportFailure: false });
-  const setDefaultProject = useAtomCommand(hopliteCloudEnvironment.setDefaultProject, {
-    reportFailure: false,
-  });
   const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,8 +103,8 @@ export function HopliteCloudSetup() {
           />
         </label>
         <p className="text-xs text-muted-foreground">
-          Create a service account key in Hoplite under Settings → Workspace → API keys, with
-          project read and thread write access. It is stored on this machine, not in this client.
+          Create an API key in Hoplite under Settings → Workspace → API keys. It's saved on this
+          computer and never shown in the app again.
         </p>
         {errorAlert}
         <div className="flex justify-end">
@@ -130,45 +124,7 @@ export function HopliteCloudSetup() {
         </Alert>
       ) : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="text-sm text-foreground">
-          Connected · {status.projects.length}{" "}
-          {status.projects.length === 1 ? "project" : "projects"}
-        </span>
-        <Select
-          value={status.defaultProjectId ?? NO_DEFAULT_PROJECT}
-          disabled={pending || status.projects.length === 0}
-          onValueChange={(value) => {
-            if (value === null) return;
-            void run(() =>
-              setDefaultProject({
-                environmentId,
-                input: { projectId: value === NO_DEFAULT_PROJECT ? null : value },
-              }),
-            );
-          }}
-        >
-          <SelectTrigger aria-label="Default Hoplite project" className="min-w-48" size="sm">
-            <SelectValue>
-              {status.projects.find((project) => project.id === status.defaultProjectId)?.name ??
-                "No default project"}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectPopup>
-            <SelectItem value={NO_DEFAULT_PROJECT}>No default project</SelectItem>
-            {status.projects.map((project) => (
-              <SelectItem key={project.id} value={project.id}>
-                {project.name}
-              </SelectItem>
-            ))}
-          </SelectPopup>
-        </Select>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Agents name the GitHub repo to work in, and Hoplite uses the project that has it, creating
-        one when none does. The default project is only for tasks that name no repo.
-      </p>
-      {errorAlert}
-      <div className="flex justify-end">
+        <span className="text-sm text-foreground">Connected</span>
         <Button
           size="sm"
           variant="outline"
@@ -178,6 +134,7 @@ export function HopliteCloudSetup() {
           Disconnect
         </Button>
       </div>
+      {errorAlert}
     </div>
   );
 }
@@ -197,7 +154,6 @@ export function HopliteCloudSection() {
   const [manageOpen, setManageOpen] = useState(false);
   const status = query.data;
   if (status === null || !status.connected) return null;
-  const project = status.projects.find((candidate) => candidate.id === status.defaultProjectId);
   return (
     <SettingsSection id="hoplite-cloud" title="Cloud agents">
       <SettingsRow
@@ -209,7 +165,7 @@ export function HopliteCloudSection() {
         }
         description={
           status.problem ??
-          `Agents can hand tasks to Hoplite. Each runs in a cloud sandbox${project ? ` with ${project.name}` : ""} and reports back to the thread.`
+          "Agents can send tasks to Hoplite to run in the cloud. Results come back to the chat."
         }
         control={
           <Dialog open={manageOpen} onOpenChange={setManageOpen}>
@@ -217,7 +173,7 @@ export function HopliteCloudSection() {
             <DialogPopup className="sm:max-w-lg">
               <DialogHeader>
                 <DialogTitle>Hoplite</DialogTitle>
-                <DialogDescription>Choose the default project or disconnect.</DialogDescription>
+                <DialogDescription>Your Hoplite key is connected.</DialogDescription>
               </DialogHeader>
               <DialogPanel>
                 <HopliteCloudSetup />

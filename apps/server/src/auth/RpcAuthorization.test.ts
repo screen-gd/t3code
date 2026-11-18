@@ -51,21 +51,14 @@ describe("RPC authorization scopes", () => {
     );
   });
 
-  it("keeps the Hoplite key behind settings scope and spending it behind operate scope", () => {
+  it("keeps the Hoplite key behind settings scope", () => {
     for (const method of [
       WS_METHODS.hopliteCloudGetStatus,
       WS_METHODS.hopliteCloudConnect,
       WS_METHODS.hopliteCloudDisconnect,
-      WS_METHODS.hopliteCloudSetDefaultProject,
     ]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
     }
-    expect(requiredScopeForRpcMethod(WS_METHODS.hopliteCloudStartTask)).toBe(
-      AuthOrchestrationOperateScope,
-    );
-    expect(requiredScopeForRpcMethod(WS_METHODS.hopliteCloudGetTask)).toBe(
-      AuthOrchestrationReadScope,
-    );
   });
 
   it("separates passive terminal observation from operations that can change a shell", () => {

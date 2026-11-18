@@ -121,9 +121,6 @@ const makeHarness = () => {
         ],
       });
     }
-    if (request.method === "PUT" && url.pathname === "/api/projects/prj_1/env-vars/STRIPE_KEY") {
-      return respond(200, { ok: true, envVar: { key: "STRIPE_KEY", updatedAt: "2026-01-01" } });
-    }
     if (url.pathname === "/api/threads/thr_1/questions") {
       return respond(200, {
         ok: true,
@@ -147,51 +144,6 @@ const makeHarness = () => {
     }
     if (request.method === "POST" && url.pathname === "/api/threads/thr_1/questions/q_1") {
       return respond(202, { ok: true, result: { threadId: "thr_1", runId: "run_1" } });
-    }
-    if (url.pathname === "/api/threads/thr_1/runs/run_1/activity") {
-      const tool = (id: string, toolName: string, createdAt: string) => ({
-        kind: "tool",
-        id,
-        threadId: "thr_1",
-        toolName,
-        status: "completed",
-        createdAt,
-        inputPreview: "x".repeat(500),
-      });
-      return Option.isNone(UrlParams.getFirst(request.urlParams, "cursor"))
-        ? respond(200, {
-            ok: true,
-            hasMore: true,
-            nextCursor: "a2",
-            items: [
-              tool("t_1", "Read", "2026-01-01T00:00:01Z"),
-              {
-                kind: "thinking",
-                id: "k_1",
-                threadId: "thr_1",
-                status: "completed",
-                createdAt: "2026-01-01T00:00:02Z",
-              },
-            ],
-          })
-        : respond(200, {
-            ok: true,
-            hasMore: false,
-            nextCursor: null,
-            items: [tool("t_2", "Edit", "2026-01-01T00:00:03Z")],
-          });
-    }
-    if (url.pathname === "/api/threads/thr_1/diff") {
-      return respond(200, {
-        ok: true,
-        diff: {
-          threadId: "thr_1",
-          mode: "base",
-          files: [
-            { path: "src/login.ts", state: "modified", additions: 4, deletions: 1, patch: "@@" },
-          ],
-        },
-      });
     }
     if (url.pathname === "/api/threads/thr_1") return respond(200, { ok: true, thread });
     if (url.pathname === "/api/threads/thr_1/active-run") {
@@ -234,39 +186,29 @@ it.effect("a rejected key is never saved and its text stays out of the error", (
     assert.equal(error.code, "invalid_key");
     assert.notInclude(error.message, REVOKED_KEY);
     assert.isFalse(harness.stored.has(HopliteCloud.HOPLITE_API_KEY_SECRET));
-    assert.deepStrictEqual(yield* hoplite.status, {
-      connected: false,
-      projects: [],
-      defaultProjectId: null,
-      problem: null,
-    });
+    assert.deepStrictEqual(yield* hoplite.status, { connected: false, problem: null });
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect("connecting lists every project page and starts tasks in the default project", () => {
+it.effect("connecting checks the key, and a task starts in the repo's project", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
     const connected = yield* hoplite.connect(GOOD_KEY);
-    assert.deepStrictEqual(
-      connected.projects.map((project) => project.id),
-      ["prj_1", "prj_2"],
-    );
+    assert.deepStrictEqual(connected, { connected: true, problem: null });
+
     assert.equal(yield* errorCode(hoplite.startTask({ prompt: "Fix login" })), "project_required");
-    assert.equal(
-      yield* errorCode(hoplite.setDefaultProject({ projectId: "prj_missing" })),
-      "not_found",
-    );
-    const status = yield* hoplite.setDefaultProject({ projectId: "prj_2" });
-    assert.equal(status.defaultProjectId, "prj_2");
 
     const { task, runId } = yield* hoplite.startTask({
       prompt: "Fix login",
+      repo: "acme/api",
       clientRequestId: "req-1",
     });
     assert.equal(task.status, "queued");
     assert.equal(runId, "run_1");
-    const create = harness.sent.find((request) => request.method === "POST");
+    const create = harness.sent.find(
+      (request) => request.method === "POST" && request.path === "/api/threads",
+    );
     assert.deepStrictEqual(create?.body, { projectId: "prj_2", prompt: "Fix login" });
     // Hoplite replays a write with the same key instead of starting a second thread.
     assert.equal(create?.headers["idempotency-key"], "t3code:req-1");
@@ -332,7 +274,6 @@ it.effect("a saved key that stops working stays connected and says why", () => {
     harness.stored.set(HopliteCloud.HOPLITE_API_KEY_SECRET, new TextEncoder().encode(REVOKED_KEY));
     const status = yield* hoplite.status;
     assert.isTrue(status.connected);
-    assert.deepStrictEqual(status.projects, []);
     assert.match(status.problem ?? "", /rejected the API key/);
     yield* hoplite.disconnect;
     assert.isFalse(harness.stored.has(HopliteCloud.HOPLITE_API_KEY_SECRET));
@@ -372,64 +313,37 @@ it.effect("a task takes follow-ups, stops its active run, and reports its previe
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect(
-  "a task reports its questions, recent tools and changed files, and takes an answer",
-  () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const hoplite = yield* HopliteCloud.HopliteCloud;
-      yield* hoplite.connect(GOOD_KEY);
-      const activity = yield* hoplite.activity({ threadId: "thr_1" });
-      assert.equal(activity.runStatus, "running");
-      assert.deepStrictEqual(activity.questions, [
-        {
-          questionId: "q_1",
-          parts: [
-            {
-              question: "Keep the old session cookie?",
-              options: [
-                { label: "Yes", description: "Safer rollout" },
-                { label: "No", description: "" },
-              ],
-            },
-          ],
-        },
-      ]);
-      assert.deepStrictEqual(
-        activity.recentTools.map(({ tool, input }) => [tool, input?.length]),
-        [
-          ["Read", 300],
-          ["Edit", 300],
-        ],
-      );
-      assert.deepStrictEqual(activity.changedFiles, [
-        { path: "src/login.ts", state: "modified", additions: 4, deletions: 1 },
-      ]);
-
-      const answered = yield* hoplite.answerQuestion({
-        threadId: "thr_1",
-        questionId: "q_1",
-        answer: "Yes",
-        clientRequestId: "req-3",
-      });
-      assert.deepStrictEqual(answered, { runId: "run_1" });
-      const answer = harness.sent.find((request) => request.path.endsWith("/questions/q_1"));
-      assert.deepStrictEqual(answer?.body, { answer: "Yes" });
-      assert.equal(answer?.headers["idempotency-key"], "t3code:req-3");
-    }).pipe(Effect.provide(harness.layer));
-  },
-);
-
-it.effect("a variable a task needs is stored, encrypted, on that task's project", () => {
+it.effect("a task reports its questions and takes an answer", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
     yield* hoplite.connect(GOOD_KEY);
-    const saved = yield* hoplite.setEnv({ threadId: "thr_1", key: "STRIPE_KEY", value: "sk_test" });
-    assert.deepStrictEqual(saved, { projectId: "prj_1" });
-    const put = harness.sent.find((request) => request.method === "PUT");
-    assert.equal(put?.path, "/api/projects/prj_1/env-vars/STRIPE_KEY");
-    assert.deepStrictEqual(put?.body, { value: "sk_test" });
+    const questions = yield* hoplite.listQuestions({ threadId: "thr_1" });
+    assert.deepStrictEqual(questions, [
+      {
+        questionId: "q_1",
+        parts: [
+          {
+            question: "Keep the old session cookie?",
+            options: [
+              { label: "Yes", description: "Safer rollout" },
+              { label: "No", description: "" },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    const answered = yield* hoplite.answerQuestion({
+      threadId: "thr_1",
+      questionId: "q_1",
+      answer: "Yes",
+      clientRequestId: "req-3",
+    });
+    assert.deepStrictEqual(answered, { runId: "run_1" });
+    const answer = harness.sent.find((request) => request.path.endsWith("/questions/q_1"));
+    assert.deepStrictEqual(answer?.body, { answer: "Yes" });
+    assert.equal(answer?.headers["idempotency-key"], "t3code:req-3");
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -438,13 +352,12 @@ it.effect("a model named the way a person says it runs as Hoplite's id for it", 
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
     yield* hoplite.connect(GOOD_KEY);
-    yield* hoplite.setDefaultProject({ projectId: "prj_1" });
-    yield* hoplite.startTask({ prompt: "Fix login", model: "GPT 6 Luna" });
+    yield* hoplite.startTask({ prompt: "Fix login", repo: "acme/api", model: "GPT 6 Luna" });
     const create = harness.sent.find(
       (request) => request.method === "POST" && request.path === "/api/threads",
     );
     assert.deepStrictEqual(create?.body, {
-      projectId: "prj_1",
+      projectId: "prj_2",
       prompt: "Fix login",
       model: "gpt-6-luna",
     });
@@ -453,7 +366,9 @@ it.effect("a model named the way a person says it runs as Hoplite's id for it", 
     const message = harness.sent.find((request) => request.path.endsWith("/messages"));
     assert.deepStrictEqual(message?.body, { content: "Again", model: "claude-sonnet-5" });
 
-    const unknown = yield* Effect.flip(hoplite.startTask({ prompt: "Fix", model: "gpt-9" }));
+    const unknown = yield* Effect.flip(
+      hoplite.startTask({ prompt: "Fix", repo: "acme/api", model: "gpt-9" }),
+    );
     assert.equal(unknown.code, "model_unavailable");
     assert.include(unknown.message, "gpt-6-luna, claude-sonnet-5");
   }).pipe(Effect.provide(harness.layer));

@@ -26,10 +26,5 @@ export function createHopliteCloudEnvironmentAtoms<R, E>(
       tag: WS_METHODS.hopliteCloudDisconnect,
       concurrency: settingsWrite,
     }),
-    setDefaultProject: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:hoplite-cloud:set-default-project",
-      tag: WS_METHODS.hopliteCloudSetDefaultProject,
-      concurrency: settingsWrite,
-    }),
   };
 }

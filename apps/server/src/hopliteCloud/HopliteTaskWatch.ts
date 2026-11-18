@@ -132,7 +132,7 @@ function settledWake(
             questions.length === 0
               ? "Reply with hoplite_task and its threadId."
               : "Answer with hoplite_task, its threadId and the questionId."
-          } If this thread cannot decide, ask the user. For a secret or API key, use request_secret, then hoplite_env, never chat.`,
+          } If this thread cannot decide, ask the user.`,
           "updated",
         ] as const)
       : status === "failed"

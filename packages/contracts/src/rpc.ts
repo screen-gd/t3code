@@ -377,15 +377,7 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
-import {
-  HopliteCloudConnectInput,
-  HopliteCloudError,
-  HopliteCloudGetTaskInput,
-  HopliteCloudSetDefaultProjectInput,
-  HopliteCloudStartTaskInput,
-  HopliteCloudStatus,
-  HopliteCloudTask,
-} from "./hopliteCloud.ts";
+import { HopliteCloudConnectInput, HopliteCloudError, HopliteCloudStatus } from "./hopliteCloud.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -563,9 +555,6 @@ export const WS_METHODS = {
   hopliteCloudGetStatus: "hopliteCloud.getStatus",
   hopliteCloudConnect: "hopliteCloud.connect",
   hopliteCloudDisconnect: "hopliteCloud.disconnect",
-  hopliteCloudSetDefaultProject: "hopliteCloud.setDefaultProject",
-  hopliteCloudStartTask: "hopliteCloud.startTask",
-  hopliteCloudGetTask: "hopliteCloud.getTask",
 
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
@@ -1020,24 +1009,6 @@ const WsHopliteCloudConnectRpc = Rpc.make(WS_METHODS.hopliteCloudConnect, {
 const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, {
   payload: Schema.Struct({}),
   success: HopliteCloudStatus,
-  error: HopliteCloudRpcError,
-});
-
-const WsHopliteCloudSetDefaultProjectRpc = Rpc.make(WS_METHODS.hopliteCloudSetDefaultProject, {
-  payload: HopliteCloudSetDefaultProjectInput,
-  success: HopliteCloudStatus,
-  error: HopliteCloudRpcError,
-});
-
-const WsHopliteCloudStartTaskRpc = Rpc.make(WS_METHODS.hopliteCloudStartTask, {
-  payload: HopliteCloudStartTaskInput,
-  success: HopliteCloudTask,
-  error: HopliteCloudRpcError,
-});
-
-const WsHopliteCloudGetTaskRpc = Rpc.make(WS_METHODS.hopliteCloudGetTask, {
-  payload: HopliteCloudGetTaskInput,
-  success: HopliteCloudTask,
   error: HopliteCloudRpcError,
 });
 
@@ -2104,9 +2075,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsHopliteCloudGetStatusRpc,
   WsHopliteCloudConnectRpc,
   WsHopliteCloudDisconnectRpc,
-  WsHopliteCloudSetDefaultProjectRpc,
-  WsHopliteCloudStartTaskRpc,
-  WsHopliteCloudGetTaskRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsFilterOptionsRpc,

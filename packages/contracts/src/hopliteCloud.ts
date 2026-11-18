@@ -10,16 +10,8 @@ import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 const HopliteId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
 const HopliteModel = Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128)));
 
-export const HopliteCloudProject = Schema.Struct({
-  id: HopliteId,
-  name: Schema.String,
-});
-export type HopliteCloudProject = typeof HopliteCloudProject.Type;
-
 export const HopliteCloudStatus = Schema.Struct({
   connected: Schema.Boolean,
-  projects: Schema.Array(HopliteCloudProject),
-  defaultProjectId: Schema.NullOr(HopliteId),
   /** Why the stored key could not list projects, such as a revoked key. */
   problem: Schema.NullOr(Schema.String),
 });
@@ -29,11 +21,6 @@ export const HopliteCloudConnectInput = Schema.Struct({
   apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
 });
 export type HopliteCloudConnectInput = typeof HopliteCloudConnectInput.Type;
-
-export const HopliteCloudSetDefaultProjectInput = Schema.Struct({
-  projectId: Schema.NullOr(HopliteId),
-});
-export type HopliteCloudSetDefaultProjectInput = typeof HopliteCloudSetDefaultProjectInput.Type;
 
 export const HopliteCloudThreadStatus = Schema.Literals([
   "queued",
@@ -67,7 +54,6 @@ export type HopliteCloudTaskResult = typeof HopliteCloudTaskResult.Type;
 export const HopliteCloudStartTaskInput = Schema.Struct({
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
   title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
-  projectId: Schema.optional(HopliteId),
   /** A GitHub `owner/name`; picks the Hoplite project with it, creating one when none has it. */
   repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /** A Hoplite model id or name, such as `gpt-6-luna` or "GPT 6 Luna"; omitted uses Hoplite's default. */
@@ -109,44 +95,6 @@ export const HopliteCloudQuestion = Schema.Struct({
   ),
 });
 export type HopliteCloudQuestion = typeof HopliteCloudQuestion.Type;
-
-export const HopliteCloudActivity = Schema.Struct({
-  ...HopliteCloudTask.fields,
-  runStatus: Schema.NullOr(
-    Schema.Literals(["queued", "running", "waiting", "completed", "failed", "cancelled"]),
-  ),
-  questions: Schema.Array(HopliteCloudQuestion),
-  /** The latest run's most recent tool calls, oldest first, with previews cut short. */
-  recentTools: Schema.Array(
-    Schema.Struct({
-      tool: Schema.String,
-      status: Schema.String,
-      input: Schema.NullOr(Schema.String),
-      error: Schema.NullOr(Schema.String),
-    }),
-  ),
-  /** Files the task changed against its base branch, without patches. */
-  changedFiles: Schema.Array(
-    Schema.Struct({
-      path: Schema.String,
-      state: Schema.String,
-      additions: Schema.Number,
-      deletions: Schema.Number,
-    }),
-  ),
-});
-export type HopliteCloudActivity = typeof HopliteCloudActivity.Type;
-
-/** A Hoplite project environment variable, set on the project of the task `threadId` runs in. */
-export const HopliteCloudSetEnvInput = Schema.Struct({
-  threadId: HopliteId,
-  key: TrimmedNonEmptyString.check(
-    Schema.isMaxLength(128),
-    Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/),
-  ),
-  value: Schema.String.check(Schema.isMaxLength(32_768)),
-});
-export type HopliteCloudSetEnvInput = typeof HopliteCloudSetEnvInput.Type;
 
 export const HopliteCloudPreviewInput = Schema.Struct({
   threadId: HopliteId,

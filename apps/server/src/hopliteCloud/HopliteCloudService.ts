@@ -1,16 +1,12 @@
 import {
-  type HopliteCloudActivity,
   type HopliteCloudAnswerInput,
   HopliteCloudError,
   type HopliteCloudErrorCode,
   type HopliteCloudGetTaskInput,
   HopliteCloudPreview,
   type HopliteCloudPreviewInput,
-  type HopliteCloudProject,
   type HopliteCloudQuestion,
   type HopliteCloudSendMessageInput,
-  type HopliteCloudSetEnvInput,
-  type HopliteCloudSetDefaultProjectInput,
   type HopliteCloudStartTaskInput,
   type HopliteCloudStatus,
   type HopliteCloudTask,
@@ -30,15 +26,10 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 
 export const HOPLITE_API_BASE_URL = "https://api.hoplite.sh";
 export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
-// Not secret, but it belongs to the key: disconnecting forgets both.
-const HOPLITE_DEFAULT_PROJECT_SECRET = "hoplite-cloud-default-project";
 
 const REQUEST_TIMEOUT = "20 seconds";
 const MAX_PROJECT_PAGES = 10;
 const MAX_REPLY_LENGTH = 4_000;
-const MAX_ACTIVITY_PAGES = 10;
-const RECENT_TOOLS = 15;
-const MAX_PREVIEW_LENGTH = 300;
 
 const ProjectRecord = Schema.Struct({
   id: Schema.String,
@@ -119,33 +110,7 @@ const QuestionsResponse = Schema.Struct({
 const AnswerResponse = Schema.Struct({
   result: Schema.Struct({ runId: Schema.optional(Schema.String) }),
 });
-const ActivityPage = Schema.Struct({
-  items: Schema.Array(
-    Schema.Struct({
-      kind: Schema.String,
-      toolName: Schema.optional(Schema.String),
-      status: Schema.String,
-      createdAt: Schema.String,
-      inputPreview: Schema.optional(Schema.String),
-      errorPreview: Schema.optional(Schema.String),
-    }),
-  ),
-  nextCursor: Schema.optional(Schema.NullOr(Schema.String)),
-});
-const DiffResponse = Schema.Struct({
-  diff: Schema.Struct({
-    files: Schema.Array(
-      Schema.Struct({
-        path: Schema.String,
-        state: Schema.optional(Schema.String),
-        additions: Schema.optional(Schema.Number),
-        deletions: Schema.optional(Schema.Number),
-      }),
-    ),
-  }),
-});
 
-const SetEnvResponse = Schema.Struct({ envVar: Schema.Struct({ key: Schema.String }) });
 const ModelsResponse = Schema.Struct({
   models: Schema.optional(Schema.Array(Schema.Struct({ id: Schema.String, name: Schema.String }))),
 });
@@ -190,9 +155,6 @@ export class HopliteCloud extends Context.Service<
     readonly connected: Effect.Effect<boolean>;
     readonly connect: (apiKey: string) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly disconnect: Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
-    readonly setDefaultProject: (
-      input: HopliteCloudSetDefaultProjectInput,
-    ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly startTask: (
       input: HopliteCloudStartTaskInput,
     ) => Effect.Effect<HopliteStartedTask, HopliteCloudError>;
@@ -219,13 +181,6 @@ export class HopliteCloud extends Context.Service<
     readonly answerQuestion: (
       input: HopliteCloudAnswerInput,
     ) => Effect.Effect<{ readonly runId: string | null }, HopliteCloudError>;
-    readonly activity: (
-      input: HopliteCloudGetTaskInput,
-    ) => Effect.Effect<HopliteCloudActivity, HopliteCloudError>;
-    /** Stores an encrypted variable on the task's project; returns that project's id. */
-    readonly setEnv: (
-      input: HopliteCloudSetEnvInput,
-    ) => Effect.Effect<{ readonly projectId: string }, HopliteCloudError>;
   }
 >()("t3/hopliteCloud/HopliteCloudService/HopliteCloud") {}
 
@@ -234,8 +189,7 @@ const MESSAGES: Record<HopliteCloudErrorCode, string> = {
   invalid_key: "Hoplite rejected the API key. Create a new key and connect again.",
   forbidden: "The Hoplite API key lacks the permission for this action.",
   not_found: "Hoplite has no such project or thread for this key.",
-  project_required:
-    "Name the GitHub repo (owner/name) to work in, or set a default Hoplite project in Settings > Environments.",
+  project_required: "Name the GitHub repo (owner/name) to work in.",
   repo_unavailable:
     "Hoplite's GitHub app cannot see that repository. Install it on the repository from Hoplite, then try again.",
   model_unavailable: "Hoplite has no such model for this key.",
@@ -327,34 +281,16 @@ const make = Effect.gen(function* () {
   });
 
   const statusFor = Effect.fn("HopliteCloud.statusFor")(function* (apiKey: string) {
-    const defaultProjectId = Option.getOrNull(yield* readSecret(HOPLITE_DEFAULT_PROJECT_SECRET));
     return yield* listProjects(apiKey).pipe(
-      Effect.map((projects): HopliteCloudStatus => ({
-        connected: true,
-        projects: projects.map(({ id, name }): HopliteCloudProject => ({ id, name })),
-        defaultProjectId: projects.some((project) => project.id === defaultProjectId)
-          ? defaultProjectId
-          : null,
-        problem: null,
-      })),
+      Effect.map((): HopliteCloudStatus => ({ connected: true, problem: null })),
       // A saved key that stops working stays connected so the user can see why and replace it.
       Effect.catch((error) =>
-        Effect.succeed<HopliteCloudStatus>({
-          connected: true,
-          projects: [],
-          defaultProjectId,
-          problem: error.message,
-        }),
+        Effect.succeed<HopliteCloudStatus>({ connected: true, problem: error.message }),
       ),
     );
   });
 
-  const disconnectedStatus: HopliteCloudStatus = {
-    connected: false,
-    projects: [],
-    defaultProjectId: null,
-    problem: null,
-  };
+  const disconnectedStatus: HopliteCloudStatus = { connected: false, problem: null };
 
   const status = readSecret(HOPLITE_API_KEY_SECRET).pipe(
     Effect.flatMap(
@@ -370,31 +306,13 @@ const make = Effect.gen(function* () {
     // Check the key before saving it so a typo never replaces a working one.
     yield* listProjects(apiKey);
     yield* saveSecret(HOPLITE_API_KEY_SECRET, apiKey);
-    yield* removeSecret(HOPLITE_DEFAULT_PROJECT_SECRET);
     return yield* statusFor(apiKey);
   });
 
   const disconnect = Effect.gen(function* () {
     yield* removeSecret(HOPLITE_API_KEY_SECRET);
-    yield* removeSecret(HOPLITE_DEFAULT_PROJECT_SECRET);
     return disconnectedStatus;
   }).pipe(Effect.withSpan("HopliteCloud.disconnect"));
-
-  const setDefaultProject = Effect.fn("HopliteCloud.setDefaultProject")(function* (
-    input: HopliteCloudSetDefaultProjectInput,
-  ) {
-    const apiKey = yield* requireKey;
-    if (input.projectId === null) {
-      yield* removeSecret(HOPLITE_DEFAULT_PROJECT_SECRET);
-      return yield* statusFor(apiKey);
-    }
-    const projects = yield* listProjects(apiKey);
-    if (!projects.some((project) => project.id === input.projectId)) {
-      return yield* failure("not_found");
-    }
-    yield* saveSecret(HOPLITE_DEFAULT_PROJECT_SECRET, input.projectId);
-    return yield* statusFor(apiKey);
-  });
 
   const threadPath = (threadId: string) =>
     `${HOPLITE_API_BASE_URL}/api/threads/${encodeURIComponent(threadId)}`;
@@ -501,13 +419,9 @@ const make = Effect.gen(function* () {
     input: HopliteCloudStartTaskInput,
   ) {
     const apiKey = yield* requireKey;
+    if (input.repo === undefined) return yield* failure("project_required");
     const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
-    const projectId =
-      input.projectId ??
-      (input.repo === undefined
-        ? Option.getOrUndefined(yield* readSecret(HOPLITE_DEFAULT_PROJECT_SECRET))
-        : yield* projectForRepo(apiKey, input.repo));
-    if (projectId === undefined) return yield* failure("project_required");
+    const projectId = yield* projectForRepo(apiKey, input.repo);
     const request = HttpClientRequest.post(`${HOPLITE_API_BASE_URL}/api/threads`).pipe(
       yield* idempotent(input.clientRequestId),
       HttpClientRequest.bodyJsonUnsafe({
@@ -611,94 +525,6 @@ const make = Effect.gen(function* () {
     return { runId: result.runId ?? null };
   });
 
-  const recentTools = Effect.fn("HopliteCloud.recentTools")(function* (
-    apiKey: string,
-    threadId: string,
-    runId: string,
-  ) {
-    const items: Array<(typeof ActivityPage.Type)["items"][number]> = [];
-    let cursor: string | null = null;
-    for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
-      const request: HttpClientRequest.HttpClientRequest = HttpClientRequest.get(
-        `${threadPath(threadId)}/runs/${encodeURIComponent(runId)}/activity`,
-      ).pipe(
-        HttpClientRequest.setUrlParams({
-          pagination: "cursor",
-          limit: "100",
-          ...(cursor === null ? {} : { cursor }),
-        }),
-      );
-      const result: typeof ActivityPage.Type = yield* send(apiKey, request, ActivityPage);
-      items.push(...result.items.filter((item) => item.kind === "tool"));
-      cursor = result.nextCursor ?? null;
-      if (cursor === null) break;
-    }
-    return items
-      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
-      .slice(-RECENT_TOOLS)
-      .map((item) => ({
-        tool: item.toolName ?? "tool",
-        status: item.status,
-        input: item.inputPreview?.slice(0, MAX_PREVIEW_LENGTH) ?? null,
-        error: item.errorPreview?.slice(0, MAX_PREVIEW_LENGTH) ?? null,
-      }));
-  });
-
-  const changedFiles = (apiKey: string, threadId: string) =>
-    send(
-      apiKey,
-      HttpClientRequest.get(`${threadPath(threadId)}/diff`).pipe(
-        HttpClientRequest.setUrlParams({ mode: "base" }),
-      ),
-      DiffResponse,
-    ).pipe(
-      Effect.map(({ diff }) =>
-        diff.files.map((file) => ({
-          path: file.path,
-          state: file.state ?? "modified",
-          additions: file.additions ?? 0,
-          deletions: file.deletions ?? 0,
-        })),
-      ),
-    );
-
-  // A task still preparing has no activity, questions, or workspace diff; those read as empty.
-  const activity = Effect.fn("HopliteCloud.activity")(function* (input: HopliteCloudGetTaskInput) {
-    const apiKey = yield* requireKey;
-    const { task, run } = yield* readTask(input);
-    const empty = <A>(effect: Effect.Effect<ReadonlyArray<A>, HopliteCloudError>) =>
-      effect.pipe(Effect.orElseSucceed((): ReadonlyArray<A> => []));
-    const [questions, tools, files] = yield* Effect.all(
-      [
-        empty(fetchQuestions(apiKey, input.threadId)),
-        run === null ? Effect.succeed([]) : empty(recentTools(apiKey, input.threadId, run.id)),
-        empty(changedFiles(apiKey, input.threadId)),
-      ],
-      { concurrency: "unbounded" },
-    );
-    return {
-      ...task,
-      runStatus: run?.status ?? null,
-      questions,
-      recentTools: tools,
-      changedFiles: files,
-    } satisfies HopliteCloudActivity;
-  });
-
-  const setEnv = Effect.fn("HopliteCloud.setEnv")(function* (input: HopliteCloudSetEnvInput) {
-    const apiKey = yield* requireKey;
-    const { thread } = yield* send(
-      apiKey,
-      HttpClientRequest.get(threadPath(input.threadId)),
-      ThreadResponse,
-    );
-    const request = HttpClientRequest.put(
-      `${HOPLITE_API_BASE_URL}/api/projects/${encodeURIComponent(thread.projectId)}/env-vars/${encodeURIComponent(input.key)}`,
-    ).pipe(yield* idempotent(undefined), HttpClientRequest.bodyJsonUnsafe({ value: input.value }));
-    yield* send(apiKey, request, SetEnvResponse);
-    return { projectId: thread.projectId };
-  });
-
   const connected = readSecret(HOPLITE_API_KEY_SECRET).pipe(
     Effect.map(Option.isSome),
     Effect.orElseSucceed(() => false),
@@ -709,7 +535,6 @@ const make = Effect.gen(function* () {
     connected,
     connect,
     disconnect,
-    setDefaultProject,
     startTask,
     getTask,
     readTask,
@@ -718,8 +543,6 @@ const make = Effect.gen(function* () {
     preview,
     listQuestions,
     answerQuestion,
-    activity,
-    setEnv,
   });
 });
 

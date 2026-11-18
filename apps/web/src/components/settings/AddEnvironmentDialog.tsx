@@ -662,7 +662,7 @@ export function AddEnvironmentDialog({
                 : renderConnectionModeCard({
                     mode: "hoplite",
                     title: "Hoplite",
-                    description: "Let agents hand tasks to Hoplite cloud sandboxes.",
+                    description: "Let agents send tasks to Hoplite's cloud.",
                     icon: <HopliteIcon aria-hidden className="size-4" />,
                   })}
             </div>
