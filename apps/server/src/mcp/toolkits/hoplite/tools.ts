@@ -1,10 +1,8 @@
 import {
-  HopliteCloudGetTaskInput,
   HopliteCloudPreview,
   HopliteCloudPreviewInput,
   HopliteCloudSendMessageInput,
   HopliteCloudStartTaskInput,
-  HopliteCloudTask,
   HopliteCloudTaskResult,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
@@ -23,15 +21,15 @@ const dependencies = [
   HopliteTaskWatch.HopliteTaskWatch,
 ];
 
-const HopliteTaskStartTool = Tool.make("hoplite_task_start", {
+// Status and stopping go through the task's card, with task_status and task_cancel.
+const HopliteTaskTool = Tool.make("hoplite_task", {
   description:
-    "Run `prompt` as a Hoplite cloud agent thread in its own sandbox with the project's repository, separate from this checkout. Needs Hoplite connected in Settings > Environments.",
+    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`. Track it with task_status and task_cancel.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
+    threadId: Schema.optional(HopliteCloudSendMessageInput.fields.threadId),
     title: HopliteCloudStartTaskInput.fields.title,
-    projectId: HopliteCloudStartTaskInput.fields.projectId.annotate({
-      description: "Hoplite project. Default: the one set in Settings.",
-    }),
+    projectId: HopliteCloudStartTaskInput.fields.projectId,
     clientRequestId: HopliteCloudStartTaskInput.fields.clientRequestId,
   }),
   success: HopliteCloudTaskResult,
@@ -39,68 +37,22 @@ const HopliteTaskStartTool = Tool.make("hoplite_task_start", {
   failureMode: "return",
   dependencies,
 })
-  .annotate(Tool.Title, "Start Hoplite cloud task")
+  .annotate(Tool.Title, "Hoplite cloud task")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.OpenWorld, true);
 
-const HopliteTaskStatusTool = Tool.make("hoplite_task_status", {
-  description: "Status, latest reply, and pull request of a Hoplite cloud task.",
-  parameters: HopliteCloudGetTaskInput,
-  success: HopliteCloudTask,
-  failure: OrchestratorMcpFailure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Title, "Hoplite cloud task status")
-  .annotate(Tool.Readonly, true)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.OpenWorld, true);
-
-const HopliteTaskMessageTool = Tool.make("hoplite_task_message", {
-  description:
-    "Send a Hoplite cloud task a follow-up, such as an answer or more work. It runs after any active run.",
-  parameters: HopliteCloudSendMessageInput,
-  success: HopliteCloudTaskResult,
-  failure: OrchestratorMcpFailure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Title, "Message Hoplite cloud task")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.OpenWorld, true);
-
-const HopliteTaskStopTool = Tool.make("hoplite_task_stop", {
-  description: "Stop a Hoplite cloud task's active run. The thread stays and can take messages.",
-  parameters: HopliteCloudGetTaskInput,
-  success: HopliteCloudTask,
-  failure: OrchestratorMcpFailure,
-  failureMode: "return",
-  dependencies,
-})
-  .annotate(Tool.Title, "Stop Hoplite cloud task")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.OpenWorld, true);
-
-const HopliteTaskPreviewTool = Tool.make("hoplite_task_preview", {
-  description: "A Hoplite cloud task's app preview and its URL. `start` launches a stopped one.",
+const HopliteTaskPreviewTool = Tool.make("hoplite_preview", {
+  description: "A Hoplite task's app preview URL. `start` launches a stopped one.",
   parameters: HopliteCloudPreviewInput,
   success: HopliteCloudPreview,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
   dependencies,
 })
-  .annotate(Tool.Title, "Hoplite cloud task preview")
+  .annotate(Tool.Title, "Hoplite task preview")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.OpenWorld, true);
 
-export const HopliteToolkit = Toolkit.make(
-  HopliteTaskStartTool,
-  HopliteTaskStatusTool,
-  HopliteTaskMessageTool,
-  HopliteTaskStopTool,
-  HopliteTaskPreviewTool,
-);
+export const HopliteToolkit = Toolkit.make(HopliteTaskTool, HopliteTaskPreviewTool);

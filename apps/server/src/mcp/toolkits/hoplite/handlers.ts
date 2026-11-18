@@ -26,31 +26,33 @@ const callerThreadId = Effect.map(
 
 const handlers = {
   // These spend the controller's Hoplite key, so read-only clients and linked environments may not.
-  hoplite_task_start: McpToolAccess.writesWithCapability((input) =>
-    Effect.all([HopliteTaskWatch.HopliteTaskWatch, callerThreadId]).pipe(
-      Effect.flatMap(([watch, caller]) => watch.startTask(input, caller)),
-      Effect.mapError(toFailure),
-    ),
+  hoplite_task: McpToolAccess.writesWithCapability(
+    ({ threadId, prompt, title, projectId, clientRequestId }) =>
+      Effect.all([HopliteTaskWatch.HopliteTaskWatch, callerThreadId]).pipe(
+        Effect.flatMap(([watch, caller]) =>
+          threadId === undefined
+            ? watch.startTask(
+                {
+                  prompt,
+                  ...(title === undefined ? {} : { title }),
+                  ...(projectId === undefined ? {} : { projectId }),
+                  ...(clientRequestId === undefined ? {} : { clientRequestId }),
+                },
+                caller,
+              )
+            : watch.sendMessage(
+                {
+                  threadId,
+                  message: prompt,
+                  ...(clientRequestId === undefined ? {} : { clientRequestId }),
+                },
+                caller,
+              ),
+        ),
+        Effect.mapError(toFailure),
+      ),
   ),
-  hoplite_task_status: McpToolAccess.reads((input) =>
-    HopliteCloud.HopliteCloud.pipe(
-      Effect.flatMap((hoplite) => hoplite.getTask(input)),
-      Effect.mapError(toFailure),
-    ),
-  ),
-  hoplite_task_message: McpToolAccess.writesWithCapability((input) =>
-    Effect.all([HopliteTaskWatch.HopliteTaskWatch, callerThreadId]).pipe(
-      Effect.flatMap(([watch, caller]) => watch.sendMessage(input, caller)),
-      Effect.mapError(toFailure),
-    ),
-  ),
-  hoplite_task_stop: McpToolAccess.writesWithCapability((input) =>
-    HopliteTaskWatch.HopliteTaskWatch.pipe(
-      Effect.flatMap((watch) => watch.stopTask(input)),
-      Effect.mapError(toFailure),
-    ),
-  ),
-  hoplite_task_preview: McpToolAccess.writesWithCapability((input) =>
+  hoplite_preview: McpToolAccess.writesWithCapability((input) =>
     HopliteCloud.HopliteCloud.pipe(
       Effect.flatMap((hoplite) => hoplite.preview(input)),
       Effect.mapError(toFailure),

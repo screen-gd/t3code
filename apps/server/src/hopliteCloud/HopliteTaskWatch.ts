@@ -108,7 +108,10 @@ function settledWake(
   const name = describe(task);
   const [what, outcome] =
     status === "waiting"
-      ? (["is waiting for an answer. Reply with hoplite_task_message.", "updated"] as const)
+      ? ([
+          "is waiting for an answer. Reply with hoplite_task and its threadId.",
+          "updated",
+        ] as const)
       : status === "failed"
         ? (["failed.", "failed"] as const)
         : status === "cancelled"
@@ -402,7 +405,7 @@ const make = Effect.gen(function* () {
         watch,
         `unread:${watch.runId ?? watch.afterRunId ?? "none"}`,
         {
-          text: `T3 Code stopped following Hoplite task ${watch.hopliteThreadId}: ${read.failure.message} Check it with hoplite_task_status.`,
+          text: `T3 Code stopped following Hoplite task ${watch.hopliteThreadId}: ${read.failure.message}`,
           notification: {
             source: { kind: "monitor" },
             outcome: "failed",
