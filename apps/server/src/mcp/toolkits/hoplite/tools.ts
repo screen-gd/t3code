@@ -1,4 +1,7 @@
 import {
+  HopliteCloudActivity,
+  HopliteCloudAnswerInput,
+  HopliteCloudGetTaskInput,
   HopliteCloudPreview,
   HopliteCloudPreviewInput,
   HopliteCloudSendMessageInput,
@@ -24,10 +27,11 @@ const dependencies = [
 // Status and stopping go through the task's card, with task_status and task_cancel.
 const HopliteTaskTool = Tool.make("hoplite_task", {
   description:
-    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`. Pass `repo` as the GitHub owner/name to work in, usually this checkout's origin; Hoplite uses or creates its project for it. Track it with task_status and task_cancel.",
+    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. Pass `repo` as the GitHub owner/name to work in, usually this checkout's origin; Hoplite uses or creates its project for it. Track it with task_status and task_cancel.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
     threadId: Schema.optional(HopliteCloudSendMessageInput.fields.threadId),
+    questionId: Schema.optional(HopliteCloudAnswerInput.fields.questionId),
     title: HopliteCloudStartTaskInput.fields.title,
     repo: HopliteCloudStartTaskInput.fields.repo,
     projectId: HopliteCloudStartTaskInput.fields.projectId,
@@ -56,4 +60,22 @@ const HopliteTaskPreviewTool = Tool.make("hoplite_preview", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.OpenWorld, true);
 
-export const HopliteToolkit = Toolkit.make(HopliteTaskTool, HopliteTaskPreviewTool);
+const HopliteActivityTool = Tool.make("hoplite_activity", {
+  description:
+    "What a Hoplite task is doing: run status, pending questions, recent tool calls, and changed files.",
+  parameters: HopliteCloudGetTaskInput,
+  success: HopliteCloudActivity,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Hoplite task activity")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.OpenWorld, true);
+
+export const HopliteToolkit = Toolkit.make(
+  HopliteTaskTool,
+  HopliteTaskPreviewTool,
+  HopliteActivityTool,
+);

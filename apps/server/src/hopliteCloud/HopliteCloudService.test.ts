@@ -110,6 +110,75 @@ const makeHarness = () => {
         preview: { name: "web", status: "starting", port: 3000, url: "https://web.preview.test" },
       });
     }
+    if (url.pathname === "/api/threads/thr_1/questions") {
+      return respond(200, {
+        ok: true,
+        questions: [
+          {
+            questionId: "q_1",
+            runId: "run_1",
+            request: {
+              questions: [
+                {
+                  header: "Auth",
+                  multiSelect: false,
+                  question: "Keep the old session cookie?",
+                  options: [{ label: "Yes", description: "Safer rollout" }, { label: "No" }],
+                },
+              ],
+            },
+          },
+        ],
+      });
+    }
+    if (request.method === "POST" && url.pathname === "/api/threads/thr_1/questions/q_1") {
+      return respond(202, { ok: true, result: { threadId: "thr_1", runId: "run_1" } });
+    }
+    if (url.pathname === "/api/threads/thr_1/runs/run_1/activity") {
+      const tool = (id: string, toolName: string, createdAt: string) => ({
+        kind: "tool",
+        id,
+        threadId: "thr_1",
+        toolName,
+        status: "completed",
+        createdAt,
+        inputPreview: "x".repeat(500),
+      });
+      return Option.isNone(UrlParams.getFirst(request.urlParams, "cursor"))
+        ? respond(200, {
+            ok: true,
+            hasMore: true,
+            nextCursor: "a2",
+            items: [
+              tool("t_1", "Read", "2026-01-01T00:00:01Z"),
+              {
+                kind: "thinking",
+                id: "k_1",
+                threadId: "thr_1",
+                status: "completed",
+                createdAt: "2026-01-01T00:00:02Z",
+              },
+            ],
+          })
+        : respond(200, {
+            ok: true,
+            hasMore: false,
+            nextCursor: null,
+            items: [tool("t_2", "Edit", "2026-01-01T00:00:03Z")],
+          });
+    }
+    if (url.pathname === "/api/threads/thr_1/diff") {
+      return respond(200, {
+        ok: true,
+        diff: {
+          threadId: "thr_1",
+          mode: "base",
+          files: [
+            { path: "src/login.ts", state: "modified", additions: 4, deletions: 1, patch: "@@" },
+          ],
+        },
+      });
+    }
     if (url.pathname === "/api/threads/thr_1") return respond(200, { ok: true, thread });
     if (url.pathname === "/api/threads/thr_1/run-state") {
       return respond(200, {
@@ -273,3 +342,51 @@ it.effect("a task takes follow-ups, stops its active run, and reports its previe
     });
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect(
+  "a task reports its questions, recent tools and changed files, and takes an answer",
+  () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const hoplite = yield* HopliteCloud.HopliteCloud;
+      yield* hoplite.connect(GOOD_KEY);
+      const activity = yield* hoplite.activity({ threadId: "thr_1" });
+      assert.equal(activity.runStatus, "running");
+      assert.deepStrictEqual(activity.questions, [
+        {
+          questionId: "q_1",
+          parts: [
+            {
+              question: "Keep the old session cookie?",
+              options: [
+                { label: "Yes", description: "Safer rollout" },
+                { label: "No", description: "" },
+              ],
+            },
+          ],
+        },
+      ]);
+      assert.deepStrictEqual(
+        activity.recentTools.map(({ tool, input }) => [tool, input?.length]),
+        [
+          ["Read", 300],
+          ["Edit", 300],
+        ],
+      );
+      assert.deepStrictEqual(activity.changedFiles, [
+        { path: "src/login.ts", state: "modified", additions: 4, deletions: 1 },
+      ]);
+
+      const answered = yield* hoplite.answerQuestion({
+        threadId: "thr_1",
+        questionId: "q_1",
+        answer: "Yes",
+        clientRequestId: "req-3",
+      });
+      assert.deepStrictEqual(answered, { runId: "run_1" });
+      const answer = harness.sent.find((request) => request.path.endsWith("/questions/q_1"));
+      assert.deepStrictEqual(answer?.body, { answer: "Yes" });
+      assert.equal(answer?.headers["idempotency-key"], "t3code:req-3");
+    }).pipe(Effect.provide(harness.layer));
+  },
+);

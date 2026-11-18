@@ -1,10 +1,13 @@
 import {
+  type HopliteCloudActivity,
+  type HopliteCloudAnswerInput,
   HopliteCloudError,
   type HopliteCloudErrorCode,
   type HopliteCloudGetTaskInput,
   HopliteCloudPreview,
   type HopliteCloudPreviewInput,
   type HopliteCloudProject,
+  type HopliteCloudQuestion,
   type HopliteCloudSendMessageInput,
   type HopliteCloudSetDefaultProjectInput,
   type HopliteCloudStartTaskInput,
@@ -32,6 +35,9 @@ const HOPLITE_DEFAULT_PROJECT_SECRET = "hoplite-cloud-default-project";
 const REQUEST_TIMEOUT = "20 seconds";
 const MAX_PROJECT_PAGES = 10;
 const MAX_REPLY_LENGTH = 4_000;
+const MAX_ACTIVITY_PAGES = 10;
+const RECENT_TOOLS = 15;
+const MAX_PREVIEW_LENGTH = 300;
 
 const ProjectRecord = Schema.Struct({
   id: Schema.String,
@@ -92,6 +98,52 @@ const RunStateResponse = Schema.Struct({
   ),
 });
 
+const QuestionsResponse = Schema.Struct({
+  questions: Schema.Array(
+    Schema.Struct({
+      questionId: Schema.String,
+      request: Schema.Struct({
+        questions: Schema.Array(
+          Schema.Struct({
+            question: Schema.String,
+            options: Schema.Array(
+              Schema.Struct({ label: Schema.String, description: Schema.optional(Schema.String) }),
+            ),
+          }),
+        ),
+      }),
+    }),
+  ),
+});
+const AnswerResponse = Schema.Struct({
+  result: Schema.Struct({ runId: Schema.optional(Schema.String) }),
+});
+const ActivityPage = Schema.Struct({
+  items: Schema.Array(
+    Schema.Struct({
+      kind: Schema.String,
+      toolName: Schema.optional(Schema.String),
+      status: Schema.String,
+      createdAt: Schema.String,
+      inputPreview: Schema.optional(Schema.String),
+      errorPreview: Schema.optional(Schema.String),
+    }),
+  ),
+  nextCursor: Schema.optional(Schema.NullOr(Schema.String)),
+});
+const DiffResponse = Schema.Struct({
+  diff: Schema.Struct({
+    files: Schema.Array(
+      Schema.Struct({
+        path: Schema.String,
+        state: Schema.optional(Schema.String),
+        additions: Schema.optional(Schema.Number),
+        deletions: Schema.optional(Schema.Number),
+      }),
+    ),
+  }),
+});
+
 const PreviewResponse = Schema.Struct({
   preview: Schema.Struct({
     status: HopliteCloudPreview.fields.status,
@@ -147,6 +199,16 @@ export class HopliteCloud extends Context.Service<
     readonly preview: (
       input: HopliteCloudPreviewInput,
     ) => Effect.Effect<HopliteCloudPreview, HopliteCloudError>;
+    readonly listQuestions: (
+      input: HopliteCloudGetTaskInput,
+    ) => Effect.Effect<ReadonlyArray<HopliteCloudQuestion>, HopliteCloudError>;
+    /** Returns the run that resumes with the answer, when Hoplite names one. */
+    readonly answerQuestion: (
+      input: HopliteCloudAnswerInput,
+    ) => Effect.Effect<{ readonly runId: string | null }, HopliteCloudError>;
+    readonly activity: (
+      input: HopliteCloudGetTaskInput,
+    ) => Effect.Effect<HopliteCloudActivity, HopliteCloudError>;
   }
 >()("t3/hopliteCloud/HopliteCloudService/HopliteCloud") {}
 
@@ -449,6 +511,120 @@ const make = Effect.gen(function* () {
     } satisfies HopliteCloudPreview;
   });
 
+  const fetchQuestions = (apiKey: string, threadId: string) =>
+    send(
+      apiKey,
+      HttpClientRequest.get(`${threadPath(threadId)}/questions`),
+      QuestionsResponse,
+    ).pipe(
+      Effect.map(({ questions }) =>
+        questions.map((pending): HopliteCloudQuestion => ({
+          questionId: pending.questionId,
+          parts: pending.request.questions.map((part) => ({
+            question: part.question,
+            options: part.options.map((option) => ({
+              label: option.label,
+              description: option.description ?? "",
+            })),
+          })),
+        })),
+      ),
+    );
+
+  const listQuestions = Effect.fn("HopliteCloud.listQuestions")(function* ({
+    threadId,
+  }: HopliteCloudGetTaskInput) {
+    return yield* fetchQuestions(yield* requireKey, threadId);
+  });
+
+  const answerQuestion = Effect.fn("HopliteCloud.answerQuestion")(function* (
+    input: HopliteCloudAnswerInput,
+  ) {
+    const apiKey = yield* requireKey;
+    const request = HttpClientRequest.post(
+      `${threadPath(input.threadId)}/questions/${encodeURIComponent(input.questionId)}`,
+    ).pipe(
+      yield* idempotent(input.clientRequestId),
+      HttpClientRequest.bodyJsonUnsafe({ answer: input.answer }),
+    );
+    const { result } = yield* send(apiKey, request, AnswerResponse);
+    return { runId: result.runId ?? null };
+  });
+
+  const recentTools = Effect.fn("HopliteCloud.recentTools")(function* (
+    apiKey: string,
+    threadId: string,
+    runId: string,
+  ) {
+    const items: Array<(typeof ActivityPage.Type)["items"][number]> = [];
+    let cursor: string | null = null;
+    for (let page = 0; page < MAX_ACTIVITY_PAGES; page++) {
+      const request: HttpClientRequest.HttpClientRequest = HttpClientRequest.get(
+        `${threadPath(threadId)}/runs/${encodeURIComponent(runId)}/activity`,
+      ).pipe(
+        HttpClientRequest.setUrlParams({
+          pagination: "cursor",
+          limit: "100",
+          ...(cursor === null ? {} : { cursor }),
+        }),
+      );
+      const result: typeof ActivityPage.Type = yield* send(apiKey, request, ActivityPage);
+      items.push(...result.items.filter((item) => item.kind === "tool"));
+      cursor = result.nextCursor ?? null;
+      if (cursor === null) break;
+    }
+    return items
+      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .slice(-RECENT_TOOLS)
+      .map((item) => ({
+        tool: item.toolName ?? "tool",
+        status: item.status,
+        input: item.inputPreview?.slice(0, MAX_PREVIEW_LENGTH) ?? null,
+        error: item.errorPreview?.slice(0, MAX_PREVIEW_LENGTH) ?? null,
+      }));
+  });
+
+  const changedFiles = (apiKey: string, threadId: string) =>
+    send(
+      apiKey,
+      HttpClientRequest.get(`${threadPath(threadId)}/diff`).pipe(
+        HttpClientRequest.setUrlParams({ mode: "base" }),
+      ),
+      DiffResponse,
+    ).pipe(
+      Effect.map(({ diff }) =>
+        diff.files.map((file) => ({
+          path: file.path,
+          state: file.state ?? "modified",
+          additions: file.additions ?? 0,
+          deletions: file.deletions ?? 0,
+        })),
+      ),
+    );
+
+  // A task still preparing has no activity, questions, or workspace diff; those read as empty.
+  const activity = Effect.fn("HopliteCloud.activity")(function* (input: HopliteCloudGetTaskInput) {
+    const apiKey = yield* requireKey;
+    const { task, run } = yield* readTask(input);
+    const empty = <A>(effect: Effect.Effect<ReadonlyArray<A>, HopliteCloudError>) =>
+      effect.pipe(Effect.orElseSucceed((): ReadonlyArray<A> => []));
+    const [questions, tools, files] = yield* Effect.all(
+      [
+        empty(fetchQuestions(apiKey, input.threadId)),
+        run === null ? Effect.succeed([]) : empty(recentTools(apiKey, input.threadId, run.id)),
+        empty(changedFiles(apiKey, input.threadId)),
+      ],
+      { concurrency: "unbounded" },
+    );
+    return {
+      ...task,
+      runStatus: run?.status ?? null,
+      questions,
+      recentTools: tools,
+      changedFiles: files,
+    } satisfies HopliteCloudActivity;
+  });
+
   const connected = readSecret(HOPLITE_API_KEY_SECRET).pipe(
     Effect.map(Option.isSome),
     Effect.orElseSucceed(() => false),
@@ -466,6 +642,9 @@ const make = Effect.gen(function* () {
     sendMessage,
     stopTask,
     preview,
+    listQuestions,
+    answerQuestion,
+    activity,
   });
 });
 

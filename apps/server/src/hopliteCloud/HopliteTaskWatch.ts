@@ -1,8 +1,10 @@
 import {
   CommandId,
   EnvironmentId,
+  type HopliteCloudAnswerInput,
   type HopliteCloudError,
   type HopliteCloudGetTaskInput,
+  type HopliteCloudQuestion,
   type HopliteCloudSendMessageInput,
   type HopliteCloudStartTaskInput,
   type HopliteCloudTask,
@@ -53,6 +55,8 @@ const Watch = Schema.Struct({
   failures: Schema.Number,
   /** The delegated-task card in the caller thread; without one the thread gets a message. */
   taskId: Schema.optional(Schema.String),
+  /** Until Hoplite takes this answer, its run still reads as waiting on the question. */
+  answeredQuestionId: Schema.optional(Schema.String),
 });
 type HopliteTaskWatchEntry = typeof Watch.Type;
 const WatchesJson = Schema.fromJsonString(Schema.Array(Watch));
@@ -88,7 +92,9 @@ function stepWatch(
     watch.runId === null ? run.id !== watch.afterRunId : run.id === watch.runId || watch.seen;
   if (!ours) return waiting;
   if (SETTLED.includes(run.status)) return { type: "settled", runId: run.id, status: run.status };
-  return { type: "wait", watch: { ...watch, runId: run.id, seen: true } };
+  // A run seen moving again has taken any answer, so its next wait is a new one.
+  const { answeredQuestionId: _taken, ...moving } = watch;
+  return { type: "wait", watch: { ...moving, runId: run.id, seen: true } };
 }
 
 const GIVE_UP_CODES: ReadonlyArray<HopliteCloudError["code"]> = [
@@ -101,15 +107,30 @@ const GIVE_UP_CODES: ReadonlyArray<HopliteCloudError["code"]> = [
 const describe = (task: HopliteCloudTask) =>
   `Hoplite task ${task.threadId}${task.title === null ? "" : ` ("${task.title}")`}`;
 
+const formatQuestion = (question: HopliteCloudQuestion) =>
+  [
+    `Question ${question.questionId}:`,
+    ...question.parts.flatMap((part) => [
+      part.question,
+      ...part.options.map(
+        (option) =>
+          `- ${option.label}${option.description === "" ? "" : `: ${option.description}`}`,
+      ),
+    ]),
+  ].join("\n");
+
 function settledWake(
   task: HopliteCloudTask,
   status: HopliteCloud.HopliteRunStatus,
+  questions: ReadonlyArray<HopliteCloudQuestion>,
 ): { readonly text: string; readonly notification: OrchestrationV2Notification } {
   const name = describe(task);
   const [what, outcome] =
     status === "waiting"
       ? ([
-          "is waiting for an answer. Reply with hoplite_task and its threadId.",
+          questions.length === 0
+            ? "is waiting for an answer. Reply with hoplite_task and its threadId."
+            : "is waiting for an answer. Answer with hoplite_task, its threadId and the questionId. If this thread cannot decide, ask the user.",
           "updated",
         ] as const)
       : status === "failed"
@@ -118,6 +139,7 @@ function settledWake(
           ? (["was stopped.", "cancelled"] as const)
           : (["finished.", "completed"] as const);
   const details = [
+    ...(status === "waiting" ? questions.map(formatQuestion) : []),
     task.latestReply === null ? null : `Latest reply:\n${task.latestReply}`,
     task.pullRequestUrl === null ? null : `Pull request: ${task.pullRequestUrl}`,
   ].filter((line) => line !== null);
@@ -153,6 +175,10 @@ export class HopliteTaskWatch extends Context.Service<
     ) => Effect.Effect<HopliteCloudTaskResult, HopliteCloudError>;
     readonly sendMessage: (
       input: HopliteCloudSendMessageInput,
+      callerThreadId: string | undefined,
+    ) => Effect.Effect<HopliteCloudTaskResult, HopliteCloudError>;
+    readonly answerQuestion: (
+      input: HopliteCloudAnswerInput,
       callerThreadId: string | undefined,
     ) => Effect.Effect<HopliteCloudTaskResult, HopliteCloudError>;
     /** The caller asked for the stop, so it is not woken for it. */
@@ -338,6 +364,35 @@ const make = Effect.gen(function* () {
     return resultFor(before.task, watched);
   });
 
+  const answerQuestion = Effect.fn("HopliteTaskWatch.answerQuestion")(function* (
+    input: HopliteCloudAnswerInput,
+    callerThreadId: string | undefined,
+  ) {
+    const before = yield* hoplite.readTask({ threadId: input.threadId });
+    const answered = yield* hoplite.answerQuestion(input);
+    if (callerThreadId === undefined) return before.task;
+    const runId = answered.runId ?? before.run?.id ?? null;
+    const taskId = yield* recordCard({
+      callerThreadId,
+      hopliteThreadId: input.threadId,
+      runId,
+      prompt: input.answer,
+      title: before.task.title ?? undefined,
+      key: `answer:${input.questionId}`,
+    });
+    const watched = yield* add({
+      callerThreadId,
+      hopliteThreadId: input.threadId,
+      runId,
+      afterRunId: null,
+      seen: false,
+      failures: 0,
+      answeredQuestionId: input.questionId,
+      ...(taskId === undefined ? {} : { taskId }),
+    });
+    return resultFor(before.task, watched);
+  });
+
   const stopTask = Effect.fn("HopliteTaskWatch.stopTask")(function* (
     input: HopliteCloudGetTaskInput,
   ) {
@@ -421,10 +476,27 @@ const make = Effect.gen(function* () {
       if (step.watch === watch && watch.failures === 0) return;
       return yield* replace(watch, { ...step.watch, failures: 0 });
     }
+    // Without its questions, a waiting wake can still say to reply with a message.
+    const questions =
+      step.status === "waiting"
+        ? yield* hoplite
+            .listQuestions({ threadId: watch.hopliteThreadId })
+            .pipe(Effect.orElseSucceed((): ReadonlyArray<HopliteCloudQuestion> => []))
+        : [];
+    if (
+      watch.answeredQuestionId !== undefined &&
+      step.status === "waiting" &&
+      questions.every((question) => question.questionId === watch.answeredQuestionId)
+    ) {
+      return;
+    }
     yield* settle(
       watch,
-      step.runId,
-      settledWake(read.success.task, step.status),
+      // A run can wait again on a later question; each one wakes once.
+      step.status === "waiting" && questions[0] !== undefined
+        ? `${step.runId}:${questions[0].questionId}`
+        : step.runId,
+      settledWake(read.success.task, step.status, questions),
       cardStatus(step.status),
     );
     yield* replace(watch, null);
@@ -477,7 +549,7 @@ const make = Effect.gen(function* () {
 
   yield* forkParked(sweep.pipe(Effect.repeat(Schedule.spaced(SWEEP_INTERVAL))));
 
-  return HopliteTaskWatch.of({ startTask, sendMessage, stopTask, sweep });
+  return HopliteTaskWatch.of({ startTask, sendMessage, answerQuestion, stopTask, sweep });
 });
 
 export const layer = Layer.effect(HopliteTaskWatch, make);

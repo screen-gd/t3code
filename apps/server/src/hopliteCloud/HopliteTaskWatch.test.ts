@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  type HopliteCloudQuestion,
   type HopliteCloudTask,
   NodeId,
   type OrchestrationV2Run,
@@ -44,7 +45,9 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
     runs: ReadonlyArray<OrchestrationV2Run>;
     cards: ReadonlyArray<OrchestrationV2Subagent>;
     stops: number;
-  } = { run: null, reply: null, runs: [], cards: [], stops: 0 };
+    questions: ReadonlyArray<HopliteCloudQuestion>;
+    answers: Array<string>;
+  } = { run: null, reply: null, runs: [], cards: [], stops: 0, questions: [], answers: [] };
   const dispatched: Array<OrchestrationV2ServerCommand> = [];
   const layer = HopliteTaskWatch.layer.pipe(
     Layer.provide(
@@ -54,6 +57,9 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
           Effect.sync(() => ({ task: { ...task, latestReply: state.reply }, run: state.run })),
         sendMessage: () => Effect.succeed({ runId: null }),
         stopTask: () => Effect.sync(() => (state.stops++, task)),
+        listQuestions: () => Effect.sync(() => state.questions),
+        answerQuestion: (input) =>
+          Effect.sync(() => (state.answers.push(input.answer), { runId: null })),
       }),
     ),
     Layer.provide(
@@ -210,6 +216,42 @@ it.effect("a queued follow-up waits past the finished run before it", () => {
       wakes(harness.dispatched).map(({ outcome }) => outcome),
       ["updated"],
     );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a task's question wakes its caller once, and an answer waits for the next one", () => {
+  const harness = makeHarness();
+  const question = (questionId: string, text: string): HopliteCloudQuestion => ({
+    questionId,
+    parts: [{ question: text, options: [{ label: "Yes", description: "Safer rollout" }] }],
+  });
+  return Effect.gen(function* () {
+    const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    yield* watch.startTask({ prompt: "Fix login" }, "t3-thread");
+    harness.state.run = { id: "run_1", status: "waiting" };
+    harness.state.questions = [question("q_1", "Keep the old session cookie?")];
+    yield* watch.sweep;
+    const [asked] = wakes(harness.dispatched);
+    assert.strictEqual(asked?.outcome, "updated");
+    assert.include(
+      asked?.text,
+      "Question q_1:\nKeep the old session cookie?\n- Yes: Safer rollout",
+    );
+
+    const answered = yield* watch.answerQuestion(
+      { threadId: "thr_1", questionId: "q_1", answer: "Yes" },
+      "t3-thread",
+    );
+    assert.deepStrictEqual(harness.state.answers, ["Yes"]);
+    assert.equal(answered.next, HopliteTaskWatch.HOPLITE_TASK_WAKES_NEXT);
+
+    // Hoplite has not taken the answer yet, so the same question is still pending.
+    yield* watch.sweep;
+    assert.equal(wakes(harness.dispatched).length, 1);
+
+    harness.state.questions = [question("q_2", "Also drop the legacy route?")];
+    yield* watch.sweep;
+    assert.include(wakes(harness.dispatched)[1]?.text, "Question q_2:");
   }).pipe(Effect.provide(harness.layer));
 });
 

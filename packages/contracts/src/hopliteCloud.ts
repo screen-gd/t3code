@@ -85,6 +85,54 @@ export const HopliteCloudSendMessageInput = Schema.Struct({
 });
 export type HopliteCloudSendMessageInput = typeof HopliteCloudSendMessageInput.Type;
 
+export const HopliteCloudAnswerInput = Schema.Struct({
+  threadId: HopliteId,
+  questionId: HopliteId,
+  answer: TrimmedNonEmptyString.check(Schema.isMaxLength(10_000)),
+  /** Makes retries send one answer. */
+  clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
+});
+export type HopliteCloudAnswerInput = typeof HopliteCloudAnswerInput.Type;
+
+/** A question a Hoplite agent stopped to ask; one answer covers all its parts. */
+export const HopliteCloudQuestion = Schema.Struct({
+  questionId: HopliteId,
+  parts: Schema.Array(
+    Schema.Struct({
+      question: Schema.String,
+      options: Schema.Array(Schema.Struct({ label: Schema.String, description: Schema.String })),
+    }),
+  ),
+});
+export type HopliteCloudQuestion = typeof HopliteCloudQuestion.Type;
+
+export const HopliteCloudActivity = Schema.Struct({
+  ...HopliteCloudTask.fields,
+  runStatus: Schema.NullOr(
+    Schema.Literals(["queued", "running", "waiting", "completed", "failed", "cancelled"]),
+  ),
+  questions: Schema.Array(HopliteCloudQuestion),
+  /** The latest run's most recent tool calls, oldest first, with previews cut short. */
+  recentTools: Schema.Array(
+    Schema.Struct({
+      tool: Schema.String,
+      status: Schema.String,
+      input: Schema.NullOr(Schema.String),
+      error: Schema.NullOr(Schema.String),
+    }),
+  ),
+  /** Files the task changed against its base branch, without patches. */
+  changedFiles: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      state: Schema.String,
+      additions: Schema.Number,
+      deletions: Schema.Number,
+    }),
+  ),
+});
+export type HopliteCloudActivity = typeof HopliteCloudActivity.Type;
+
 export const HopliteCloudPreviewInput = Schema.Struct({
   threadId: HopliteId,
   /** Start the thread's preview server when it is not running. */
