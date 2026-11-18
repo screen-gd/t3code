@@ -549,6 +549,15 @@ export interface AcpAdapterV2Flavor {
       sessionId: string,
     ) => Effect.Effect<void, EffectAcpErrors.AcpError>;
   };
+  /**
+   * Rewinds the session in place, dropping its last `droppedTurns` turns. Without it, rollback
+   * starts a fresh session and the next turn replays the kept history.
+   */
+  readonly rollbackSession?: (
+    runtime: AcpSessionRuntime.AcpSessionRuntime["Service"],
+    sessionId: string,
+    input: { readonly droppedTurns: number },
+  ) => Effect.Effect<void, EffectAcpErrors.AcpError | ProviderAdapter.ProviderAdapterProtocolError>;
   readonly runtimeHarness?: string;
   readonly registerExtensions?: (
     context: AcpAdapterV2ExtensionContext,
@@ -9926,6 +9935,35 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                     });
                   }
                   yield* awaitRuntimeTeardown();
+                  if (flavor.rollbackSession !== undefined) {
+                    yield* restartRuntimeAfterTeardownIfRequired(
+                      rollbackInput.providerThread.appThreadId,
+                    );
+                    const sessionId = yield* nativeThreadId(driver, rollbackInput.providerThread);
+                    const keptOrdinal =
+                      rollbackInput.target.type === "thread_start"
+                        ? 0
+                        : rollbackInput.target.providerTurn.ordinal;
+                    // Turns that never started sent nothing, so the agent holds no reply for them.
+                    const droppedTurns = rollbackInput.providerThreadTurns.filter(
+                      (turn) => turn.ordinal > keptOrdinal && turn.startedAt !== null,
+                    ).length;
+                    if (droppedTurns > 0) {
+                      yield* flavor.rollbackSession(runtime, sessionId, { droppedTurns });
+                    }
+                    return {
+                      providerThread: {
+                        ...rollbackInput.providerThread,
+                        status: "idle" as const,
+                        updatedAt: yield* DateTime.now,
+                      },
+                      providerTurns: rollbackInput.providerThreadTurns.filter(
+                        (turn) => turn.ordinal <= keptOrdinal,
+                      ),
+                      messages: [],
+                      runtimeRequests: [],
+                    };
+                  }
                   itemIdentityVersion = 2;
                   prepareTerminalEnvironment(
                     yield* readMcpContext(rollbackInput.providerThread.appThreadId),

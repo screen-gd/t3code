@@ -6,7 +6,7 @@ import {
   providerInstanceInitials,
 } from "@t3tools/client-runtime/state/provider-instance-display";
 
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { HOPLITE_ACP_AGENT_ID, ProviderDriverKind } from "@t3tools/contracts";
 import {
   AnthropicIcon,
   AntigravityIcon,
@@ -19,6 +19,7 @@ import {
 
 import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";
+import { HopliteLogo } from "./HopliteLogo";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
 import {
   AcpRegistryAgentIcon,
@@ -79,7 +80,9 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
   readonly agentId?: string | undefined;
   readonly iconUrl?: string | undefined;
 }): string | null {
-  if (input.driverKind !== "acpRegistry") return null;
+  if (input.driverKind !== "acpRegistry" || input.agentId?.trim() === HOPLITE_ACP_AGENT_ID) {
+    return null;
+  }
   return (
     resolveOfficialAcpRegistryIconUrl(input.iconUrl ?? null) ??
     officialAcpRegistryIconUrlForAgentId(input.agentId?.trim() || null)
@@ -113,6 +116,11 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   const badgeContent = props.badgeContent ?? "initials";
   const iconClassName = cn(props.size === "compact" && "size-3.5", props.iconClassName);
   const isAcpRegistry = props.driverKind === "acpRegistry";
+  // The server sends the reserved id as a local Hoplite instance's icon.
+  const isHoplite =
+    isAcpRegistry &&
+    (props.acpRegistryAgentId?.trim() === HOPLITE_ACP_AGENT_ID ||
+      props.acpRegistryIconUrl === HOPLITE_ACP_AGENT_ID);
   // A custom OpenAI-compatible endpoint has no brand: show its name, marked with the protocol.
   const isCustomEndpoint = props.driverKind === "openaiCompatible";
   const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
@@ -130,7 +138,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={accentColor}
     >
-      {isAcpRegistry ? (
+      {isHoplite ? (
+        <HopliteLogo className={iconClassName} />
+      ) : isAcpRegistry ? (
         <AcpRegistryAgentIcon
           className={cn("size-5 rounded-none bg-transparent", iconClassName)}
           fallbackClassName="size-full"

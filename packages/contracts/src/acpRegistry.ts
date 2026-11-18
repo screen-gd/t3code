@@ -349,3 +349,13 @@ export class AcpRegistryOperationError extends Schema.TaggedError<AcpRegistryOpe
     cause: Schema.optionalKey(Schema.Defect()),
   },
 ) {}
+
+/**
+ * Reserved id for the Hoplite logo bundled with clients; the ACP Registry has no such agent.
+ * A local Hoplite instance's provider snapshot carries it as `iconUrl`.
+ */
+export const HOPLITE_ACP_AGENT_ID = "hoplite";
+
+export function isHopliteAcpCommandPath(commandPath: string): boolean {
+  return /^hoplite(\.exe|\.cmd)?$/i.test(commandPath.trim().split(/[\\/]/).pop() ?? "");
+}

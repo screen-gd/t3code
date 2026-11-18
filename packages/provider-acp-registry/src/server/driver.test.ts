@@ -160,6 +160,30 @@ describe("acpRegistrySnapshotReadiness", () => {
     ).toBeNull();
   });
 
+  it("brands a local Hoplite instance and explains a missing CLI on Windows", () => {
+    const missing = (platform: NodeJS.Platform, commandPath: string) =>
+      buildCheckedAcpRegistrySnapshot({
+        ...identity,
+        settings: decodeSettings({ source: "local", commandPath, commandArgs: ["acp"] }),
+        checkedAt: "2026-11-18T10:00:00.000Z",
+        inspection: {
+          status: "missing_runner",
+          version: null,
+          distribution: "local",
+          command: commandPath,
+        },
+        platform,
+      });
+    const windows = missing("win32", "hoplite");
+    expect(windows.iconUrl).toBe("hoplite");
+    expect(windows.message).toContain("no Windows build");
+    expect(missing("linux", "hoplite").message).toContain(
+      "not available on this environment's PATH",
+    );
+    expect(missing("win32", "other-agent").message).not.toContain("Hoplite");
+    expect(missing("win32", "other-agent").iconUrl).toBeUndefined();
+  });
+
   it("treats a live empty command advertisement as an authoritative replacement", () => {
     const provider = buildCheckedAcpRegistrySnapshot({
       ...identity,

@@ -7,7 +7,7 @@ import {
   providerInstanceInitials,
 } from "@t3tools/client-runtime/state/provider-instance-display";
 import { useId, useState } from "react";
-import { resolveOfficialAcpRegistryIconUrl } from "@t3tools/contracts";
+import { HOPLITE_ACP_AGENT_ID, resolveOfficialAcpRegistryIconUrl } from "@t3tools/contracts";
 import { useAppearancePreferences } from "../features/settings/appearance/AppearancePreferencesProvider";
 import { AppText as Text } from "./ui/AppText";
 import { cn } from "../lib/cn";
@@ -79,6 +79,15 @@ export function ProviderIcon(props: ProviderIconProps) {
     return (
       <Image
         source={require("../../assets/antigravity.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+      />
+    );
+  }
+  if (props.provider === "acpRegistry" && props.iconUrl === HOPLITE_ACP_AGENT_ID) {
+    return (
+      <Image
+        source={require("../../assets/hoplite.png")}
         style={{ width: size, height: size }}
         contentFit="contain"
       />
@@ -162,6 +171,7 @@ export function providerInstanceNameLabel(props: {
 }): string | null {
   return props.showBadge &&
     props.provider === "acpRegistry" &&
+    props.iconUrl !== HOPLITE_ACP_AGENT_ID &&
     resolveOfficialAcpRegistryIconUrl(props.iconUrl) === null
     ? props.displayName
     : null;

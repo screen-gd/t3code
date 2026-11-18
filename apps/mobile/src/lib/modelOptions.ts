@@ -14,6 +14,8 @@ import type {
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
 import {
+  HOPLITE_ACP_AGENT_ID,
+  isHopliteAcpCommandPath,
   isManagedDriverAllowed,
   isProviderDriverKind,
   resolveProjectProviderInstanceEnabled,
@@ -345,11 +347,14 @@ export function buildModelOptions(
     const configValue = config?.settings?.providerInstances[instanceId]?.config;
     if (configValue === null || typeof configValue !== "object") return undefined;
     const agentId = "agentId" in configValue ? configValue.agentId : undefined;
-    return "source" in configValue && configValue.source === "local"
-      ? undefined
-      : typeof agentId === "string"
-        ? agentId.trim() || undefined
+    if ("source" in configValue && configValue.source === "local") {
+      return "commandPath" in configValue &&
+        typeof configValue.commandPath === "string" &&
+        isHopliteAcpCommandPath(configValue.commandPath)
+        ? HOPLITE_ACP_AGENT_ID
         : undefined;
+    }
+    return typeof agentId === "string" ? agentId.trim() || undefined : undefined;
   };
   const badgeEntries = (config?.providers ?? []).map((provider) => ({
     driverKind: provider.driver,
@@ -408,6 +413,12 @@ export function buildModelOptions(
     );
     if (order.size > 0)
       models.sort((a, b) => (order.get(a.slug) ?? Infinity) - (order.get(b.slug) ?? Infinity));
+    // Mobile icons take one string; the bundled Hoplite logo travels as its reserved agent id.
+    const providerIconUrl =
+      provider.iconUrl ||
+      (registryAgentId(provider.instanceId) === HOPLITE_ACP_AGENT_ID
+        ? HOPLITE_ACP_AGENT_ID
+        : undefined);
     for (const model of models) {
       const key = `${provider.instanceId}:${model.slug}`;
       const shortName = resolveModelShortName(model, provider.driver);
@@ -423,7 +434,7 @@ export function buildModelOptions(
         ...(provider.supportedRuntimeModes === undefined
           ? {}
           : { supportedRuntimeModes: provider.supportedRuntimeModes }),
-        ...(provider.iconUrl ? { providerIconUrl: provider.iconUrl } : {}),
+        ...(providerIconUrl ? { providerIconUrl } : {}),
         isHidden: !model.isCustom && hiddenModels.has(model.slug),
         canHide: !model.isCustom,
         isDefault: model.isDefault === true,

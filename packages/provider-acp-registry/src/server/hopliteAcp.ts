@@ -1,15 +1,19 @@
-import type { AcpAdapterV2ExtensionContext } from "@t3tools/provider-acp/server/adapter";
+import { isHopliteAcpCommandPath, ProviderDriverKind } from "@t3tools/contracts";
+import {
+  AcpProviderCapabilitiesV2,
+  type AcpAdapterV2ExtensionContext,
+  type AcpAdapterV2Flavor,
+} from "@t3tools/provider-acp/server/adapter";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import type { AcpRegistrySettings } from "../settings.ts";
 
 /** `hoplite acp` relays to Hoplite's cloud sandbox; https://hoplite.sh/docs/cli/acp */
 export function isHopliteAcpCommand(settings: AcpRegistrySettings): boolean {
-  return (
-    settings.source === "local" &&
-    /^hoplite(\.exe|\.cmd)?$/i.test(settings.commandPath.split(/[\\/]/).pop() ?? "")
-  );
+  return settings.source === "local" && isHopliteAcpCommandPath(settings.commandPath);
 }
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -88,3 +92,59 @@ export function registerHopliteAcpExtensions(context: AcpAdapterV2ExtensionConte
     context.reportRunPhase({ sessionId: notice.sessionId, label: notice.label }),
   );
 }
+
+/** Hoplite edits and rewinds its cloud sandbox; T3 must never snapshot or restore local files for it. */
+export const HOPLITE_ACP_CAPABILITIES = {
+  ...AcpProviderCapabilitiesV2,
+  checkpointing: {
+    ...AcpProviderCapabilitiesV2.checkpointing,
+    appCanCheckpointFilesystem: false,
+    providerCanRollbackConversation: true,
+  },
+};
+
+const HOPLITE_CHECKPOINT_LIMIT = 100;
+
+const HopliteCheckpoints = Schema.Struct({
+  checkpoints: Schema.Array(Schema.Struct({ checkpointId: Schema.String })),
+});
+
+/**
+ * Hoplite keeps one rewind point per reply, newest first; restoring one drops that reply and
+ * everything after it and resets the cloud workspace. The `droppedTurns`-th newest is assumed
+ * to be the first dropped T3 turn's reply: one Hoplite run per T3 turn, none from elsewhere since.
+ */
+export const rollbackHopliteSession: NonNullable<AcpAdapterV2Flavor["rollbackSession"]> = Effect.fn(
+  "rollbackHopliteSession",
+)(function* (runtime, sessionId, { droppedTurns }) {
+  const fail = (detail: string) =>
+    new ProviderAdapter.ProviderAdapterProtocolError({
+      driver: ProviderDriverKind.make("acpRegistry"),
+      detail,
+    });
+  if (droppedTurns > HOPLITE_CHECKPOINT_LIMIT) {
+    return yield* fail(
+      `Hoplite can rewind at most ${HOPLITE_CHECKPOINT_LIMIT} replies; this rewind drops ${droppedTurns}.`,
+    );
+  }
+  const { checkpoints } = yield* runtime
+    .request("_hoplite/thread/checkpoints", { sessionId, limit: droppedTurns })
+    .pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(HopliteCheckpoints)),
+      Effect.mapError((cause) =>
+        "_tag" in cause && cause._tag === "SchemaError"
+          ? fail("Hoplite returned an unreadable checkpoint list.")
+          : cause,
+      ),
+    );
+  const target = checkpoints[droppedTurns - 1];
+  if (target === undefined) {
+    return yield* fail(
+      `Hoplite has ${checkpoints.length} rewind points, but this rewind drops ${droppedTurns} replies.`,
+    );
+  }
+  yield* runtime.request("_hoplite/thread/restore_checkpoint", {
+    sessionId,
+    checkpointId: target.checkpointId,
+  });
+});

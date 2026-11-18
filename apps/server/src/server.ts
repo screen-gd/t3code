@@ -623,7 +623,7 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
 );
 
 const layerOrchestrationApplication = Layer.merge(
-  CheckpointDiffQuery.layer,
+  CheckpointDiffQuery.layer.pipe(Layer.provide(ProjectionStoreV2.layer)),
   NativeChildWorkQuery.layer,
 ).pipe(Layer.provideMerge(layerCheckpointStore), Layer.provideMerge(layerOrchestrationV2Runtime));
 

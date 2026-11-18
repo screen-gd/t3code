@@ -15,7 +15,9 @@ import * as Schema from "effect/Schema";
 
 import { CHECKPOINT_DIFF_MAX_OUTPUT_BYTES } from "../vcs/VcsDriver.ts";
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
+import { providerReportedFileDiffs, providerReportedPatch } from "./ProviderReportedDiff.ts";
 import {
   CheckpointDiffResultInvalidError,
   CheckpointRefUnavailableError,
@@ -83,6 +85,7 @@ function buildTurnDiffResult(
 /** @public */
 export const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
   const checkpointStore = yield* CheckpointStore.CheckpointStore;
   const digest = yield* Digest.Digest;
 
@@ -121,6 +124,43 @@ export const make = Effect.gen(function* () {
       const completedRunIds = new Set(
         projection.runs.filter((run) => run.status === "completed").map((run) => run.id),
       );
+
+      // No local snapshot (a provider-owned workspace): the provider's reported edits are the diff.
+      const rangeRunIds = projection.checkpoints.flatMap((checkpoint) =>
+        checkpoint.runId !== null &&
+        checkpoint.appRunOrdinal !== null &&
+        checkpoint.appRunOrdinal > input.fromTurnCount &&
+        checkpoint.appRunOrdinal <= input.toTurnCount &&
+        completedRunIds.has(checkpoint.runId)
+          ? [
+              {
+                runId: checkpoint.runId,
+                ordinal: checkpoint.appRunOrdinal,
+                status: checkpoint.status,
+              },
+            ]
+          : [],
+      );
+      if (
+        rangeRunIds.some(
+          ({ ordinal, status }) => ordinal === input.toTurnCount && status === "missing",
+        )
+      ) {
+        const items = yield* projections
+          .getRunFileChanges(
+            input.threadId,
+            rangeRunIds.map(({ runId }) => runId),
+          )
+          .pipe(
+            Effect.mapError(
+              () => new CheckpointThreadNotFoundError({ operation, threadId: input.threadId }),
+            ),
+          );
+        return buildTurnDiffResult(
+          input,
+          providerReportedPatch(providerReportedFileDiffs(items), CHECKPOINT_DIFF_MAX_OUTPUT_BYTES),
+        );
+      }
       const readyCheckpoints = projection.checkpoints.filter(
         (checkpoint) =>
           checkpoint.status === "ready" &&

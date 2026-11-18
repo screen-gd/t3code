@@ -1,6 +1,8 @@
 import { pipe } from "effect/Function";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  HOPLITE_ACP_AGENT_ID,
+  isHopliteAcpCommandPath,
   defaultInstanceIdForDriver,
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
@@ -143,6 +145,9 @@ function applyProviderInstanceBranding(
       ? (explicitInstance.config as Readonly<Record<string, unknown>>)
       : null;
   if (config?.source === "local") {
+    if (typeof config.commandPath === "string" && isHopliteAcpCommandPath(config.commandPath)) {
+      return { ...entry, acpRegistryAgentId: HOPLITE_ACP_AGENT_ID, acpRegistryIconUrl: undefined };
+    }
     return { ...entry, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
   }
   const agentId = config?.agentId;

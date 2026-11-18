@@ -276,7 +276,14 @@ export interface ProjectionCheckpointCaptureContext {
   readonly preservedCheckpointOrdinals: ReadonlyArray<number>;
   /** Side chats share their parent's worktree and never snapshot it. */
   readonly sideChat: boolean;
+  /** The provider edits its own workspace (e.g. a cloud sandbox), never the local one. */
+  readonly providerOwnsWorkspace: boolean;
 }
+
+export type OrchestrationV2FileChangeTurnItem = Extract<
+  OrchestrationV2TurnItem,
+  { readonly type: "file_change" }
+>;
 
 const RollbackTargetAttempts = Schema.Array(
   OrchestrationV2RunAttemptJsonSchema.mapFields(({ id, providerTurnId }) => ({
@@ -553,6 +560,11 @@ export interface ProjectionStoreV2Shape {
     readonly threadId: ThreadId;
     readonly itemId: TurnItemId;
   }) => Effect.Effect<OrchestrationV2TurnItem | null, ProjectionStoreV2Error>;
+  /** File edits the provider reported for these runs, in item order. */
+  readonly getRunFileChanges: (
+    threadId: ThreadId,
+    runIds: ReadonlyArray<RunId>,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationV2FileChangeTurnItem>, ProjectionStoreV2Error>;
   readonly getMessagesById: (
     threadId: ThreadId,
     messageIds: ReadonlyArray<MessageId>,
@@ -6101,6 +6113,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             WHERE thread_id = ${threadId} AND scope_id = ${target.scopeId}
               AND (status = 'ready' OR (status = 'missing' AND run_id IS NOT NULL))`,
             ]);
+            const providerThread =
+              providerRows[0] === undefined
+                ? undefined
+                : yield* decodeProviderThreadPayload(providerRows[0].payload_json);
+            const sessionRows = yield* sql<{ readonly app_checkpoints: number | null }>`
+          SELECT json_extract(payload_json, '$.capabilities.checkpointing.appCanCheckpointFilesystem')
+            AS app_checkpoints
+          FROM orchestration_v2_projection_provider_sessions
+          WHERE provider_session_id = ${providerThread?.providerSessionId ?? null}`;
             return {
               run,
               rootNode:
@@ -6111,12 +6132,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 scopeRows[0] === undefined
                   ? undefined
                   : yield* decodeCheckpointScopePayload(scopeRows[0].payload_json),
-              providerThread:
-                providerRows[0] === undefined
-                  ? undefined
-                  : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
+              providerThread,
               preservedCheckpointOrdinals: preservedRows.map(({ ordinal }) => ordinal),
               sideChat: threadRows[0].side_chat === 1,
+              providerOwnsWorkspace: sessionRows[0]?.app_checkpoints === 0,
             };
           }),
         )
@@ -6389,6 +6408,22 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         Effect.map((rows) => (rows[0]?.ordinal ?? 0) + 1),
         Effect.mapError(controlReadError(threadId)),
       );
+
+    const getRunFileChanges: ProjectionStoreV2Shape["getRunFileChanges"] = (threadId, runIds) =>
+      runIds.length === 0
+        ? Effect.succeed([])
+        : sql<{ payload_json: string }>`SELECT payload_json
+        FROM orchestration_v2_projection_turn_items
+        WHERE thread_id = ${threadId} AND run_id IN ${sql.in(runIds)} AND type = 'file_change'
+        ORDER BY ordinal ASC, turn_item_id ASC`.pipe(
+            Effect.flatMap((rows) =>
+              Effect.forEach(rows, (row) => decodeTurnItemPayload(row.payload_json)),
+            ),
+            Effect.map((items) =>
+              items.flatMap((item) => (item.type === "file_change" ? [item] : [])),
+            ),
+            Effect.mapError(controlReadError(threadId)),
+          );
 
     const getTurnItem: ProjectionStoreV2Shape["getTurnItem"] = ({ threadId, itemId }) =>
       sql<{ payload_json: string }>`SELECT payload_json
@@ -9453,6 +9488,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       hasPendingDelegatedCompletion: readOnReader(hasPendingDelegatedCompletion),
       getNextTurnItemOrdinal: readOnReader(getNextTurnItemOrdinal),
       getTurnItem: readOnReader(getTurnItem),
+      getRunFileChanges: readOnReader(getRunFileChanges),
       getMessagesById: readOnReader(getMessagesById),
       getThreadRecords: (threadId, fields, filter) =>
         getThreadRecords(threadId, fields, filter).pipe(NodeSqliteClient.readOnly),

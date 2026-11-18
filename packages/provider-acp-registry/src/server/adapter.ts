@@ -11,9 +11,11 @@ import {
 } from "./devinAcp.ts";
 import { extractDroidElicitationForm } from "./droidAcp.ts";
 import {
+  HOPLITE_ACP_CAPABILITIES,
   isHopliteAcpCommand,
   normalizeHopliteToolCall,
   registerHopliteAcpExtensions,
+  rollbackHopliteSession,
 } from "./hopliteAcp.ts";
 import { makeKimiPromptOutcomeWatch } from "./kimiAcp.ts";
 import { extractOmpElicitationForm } from "./ompAcp.ts";
@@ -254,7 +256,9 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
           ...AcpProviderCapabilitiesV2,
           turns: { ...AcpProviderCapabilitiesV2.turns, supportsSteeringByInterruptRestart: false },
         }
-      : AcpProviderCapabilitiesV2,
+      : isHoplite
+        ? HOPLITE_ACP_CAPABILITIES
+        : AcpProviderCapabilitiesV2,
     customModels: readCustomModelEntries(options.settings.customModels).map((entry) => entry.slug),
     compactViaAdvertisedCommand: true,
     promptFailure: (cause) => acpRegistryPromptFailure(registryAgentId, cause),
@@ -275,6 +279,7 @@ export const makeAcpRegistryAdapterV2 = Effect.fn("makeAcpRegistryAdapterV2")(fu
       ? {
           registerExtensions: registerHopliteAcpExtensions,
           normalizeToolCall: normalizeHopliteToolCall,
+          rollbackSession: rollbackHopliteSession,
         }
       : {}),
     ...(isClaude

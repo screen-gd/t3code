@@ -1,4 +1,5 @@
 import {
+  HOPLITE_ACP_AGENT_ID,
   officialAcpRegistryIconUrlForAgentId,
   ProviderDriverKind,
   resolveOfficialAcpRegistryIconUrl,
@@ -10,6 +11,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { AcpRegistrySettings } from "../settings.ts";
+import { isHopliteAcpCommand } from "./hopliteAcp.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Clock from "effect/Clock";
@@ -65,6 +67,11 @@ import * as AcpRegistryAuth from "./auth.ts";
 import * as AcpRegistryAuthenticationState from "./authenticationState.ts";
 
 const DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
+
+// Hoplite CLI 3.5.2 ships macOS and Linux builds only; its docs promise Windows (npm) after 3.5.2.
+const HOPLITE_WINDOWS_MISSING_MESSAGE =
+  "The Hoplite CLI ('hoplite') is not installed. Hoplite CLI 3.5.2 has no Windows build; once a release after 3.5.2 adds Windows support, install it with 'npm install -g @usehoplite/cli', or run T3 Code's server on macOS, Linux or WSL.";
+
 const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
 // Cache only successful authenticated probes so sign-in changes remain visible.
 const PROBE_SUCCESS_TTL_MS = 15 * 60 * 1_000;
@@ -291,7 +298,9 @@ function baseSnapshot(
 ): ServerProvider {
   const iconUrl =
     input.settings.source === "local"
-      ? null
+      ? isHopliteAcpCommand(input.settings)
+        ? HOPLITE_ACP_AGENT_ID
+        : null
       : (resolveOfficialAcpRegistryIconUrl(input.probe?.probe.icon) ??
         officialAcpRegistryIconUrlForAgentId(input.settings.agentId));
   return {
@@ -455,9 +464,20 @@ export function buildCheckedAcpRegistrySnapshot(
       | { readonly status: "failed"; readonly message: string };
     readonly probe?: AcpRegistryConfigurationProbeResult;
     readonly probeError?: AcpRegistryOperationError;
+    readonly platform?: NodeJS.Platform;
   },
 ): ServerProvider {
-  const readiness = acpRegistrySnapshotReadiness(input.inspection);
+  const readiness =
+    input.inspection.status === "missing_runner" &&
+    isHopliteAcpCommand(input.settings) &&
+    input.platform === "win32"
+      ? {
+          installed: false,
+          version: null,
+          status: "error" as const,
+          message: HOPLITE_WINDOWS_MISSING_MESSAGE,
+        }
+      : acpRegistrySnapshotReadiness(input.inspection);
   const probeFailed = input.probeError !== undefined;
   const advertisedAuthMethod =
     input.probeError?.reason === "authentication_failed"
@@ -540,6 +560,7 @@ export const checkAcpRegistryProviderStatus = Effect.fn("AcpRegistryDriver.check
         ...input,
         checkedAt,
         inspection: inspected.success,
+        platform: yield* HostProcess.Platform,
       });
     }
     const probed = yield* Effect.result(
@@ -583,6 +604,7 @@ export const checkAcpRegistryProviderReadiness = Effect.fn(
   const snapshot = buildCheckedAcpRegistrySnapshot({
     ...input,
     checkedAt,
+    platform: yield* HostProcess.Platform,
     inspection: Result.isFailure(inspected)
       ? {
           status: "failed",

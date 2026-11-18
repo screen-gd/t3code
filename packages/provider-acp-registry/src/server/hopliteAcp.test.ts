@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from "@effect/vitest";
 import { acpToolCallDiffPatch, acpToolCallSnippetEdit } from "@t3tools/provider-acp/server/adapter";
+import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import * as Effect from "effect/Effect";
 
-import { normalizeHopliteToolCall } from "./hopliteAcp.ts";
+import { normalizeHopliteToolCall, rollbackHopliteSession } from "./hopliteAcp.ts";
 
 const tool = (content: ReadonlyArray<unknown>, meta?: unknown) => ({
   toolCallId: "call_1",
@@ -65,4 +67,45 @@ describe("normalizeHopliteToolCall", () => {
       newStr: "a <= b\n⋯\ny",
     });
   });
+});
+
+describe("rollbackHopliteSession", () => {
+  const runtimeWith = (checkpointIds: ReadonlyArray<string>) => {
+    const calls: Array<{ readonly method: string; readonly payload: unknown }> = [];
+    const runtime = {
+      request: (method: string, payload: unknown) =>
+        Effect.sync(() => {
+          calls.push({ method, payload });
+          return method === "_hoplite/thread/checkpoints"
+            ? { checkpoints: checkpointIds.map((checkpointId) => ({ checkpointId })) }
+            : { result: { status: "restored" } };
+        }),
+    } as unknown as AcpSessionRuntime.AcpSessionRuntime["Service"];
+    return { runtime, calls };
+  };
+
+  it.effect("restores the reply of the oldest dropped turn, counted from the newest", () =>
+    Effect.gen(function* () {
+      const { runtime, calls } = runtimeWith(["cp_3", "cp_2", "cp_1"]);
+      yield* rollbackHopliteSession(runtime, "sess_1", { droppedTurns: 2 });
+      expect(calls).toEqual([
+        { method: "_hoplite/thread/checkpoints", payload: { sessionId: "sess_1", limit: 2 } },
+        {
+          method: "_hoplite/thread/restore_checkpoint",
+          payload: { sessionId: "sess_1", checkpointId: "cp_2" },
+        },
+      ]);
+    }),
+  );
+
+  it.effect("fails without restoring when Hoplite has fewer rewind points than dropped turns", () =>
+    Effect.gen(function* () {
+      const { runtime, calls } = runtimeWith(["cp_1"]);
+      const exit = yield* Effect.exit(
+        rollbackHopliteSession(runtime, "sess_1", { droppedTurns: 2 }),
+      );
+      expect(exit._tag).toBe("Failure");
+      expect(calls.map((call) => call.method)).toEqual(["_hoplite/thread/checkpoints"]);
+    }),
+  );
 });

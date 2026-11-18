@@ -9,7 +9,10 @@ import * as Path from "effect/Path";
 
 import { checkpointRefForScopeOrdinal } from "../orchestration-v2/CheckpointService.ts";
 import { OrchestratorProjectionError } from "../orchestration-v2/Orchestrator.ts";
-import type { ProjectionCheckpointContext } from "../orchestration-v2/ProjectionStore.ts";
+import {
+  ProjectionStoreV2,
+  type ProjectionCheckpointContext,
+} from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
@@ -51,10 +54,14 @@ function layerFor(input: {
   readonly projection: Effect.Effect<ProjectionCheckpointContext, OrchestratorProjectionError>;
   readonly diffCheckpoints?: CheckpointStore.CheckpointStore["Service"]["diffCheckpoints"];
   readonly authoredPaths?: ReadonlySet<string>;
+  readonly getRunFileChanges?: ProjectionStoreV2["Service"]["getRunFileChanges"];
 }) {
   return CheckpointDiffQuery.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        Layer.mock(ProjectionStoreV2)({
+          getRunFileChanges: input.getRunFileChanges ?? (() => Effect.succeed([])),
+        }),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getCheckpointContext: () => input.projection,
         }),
@@ -67,6 +74,34 @@ function layerFor(input: {
     Layer.provideMerge(NodeCrypto.layer),
   );
 }
+
+it.effect("reads a turn without a local snapshot from the provider's reported edits", () => {
+  const projection = makeProjection();
+  const requestedRunIds: Array<ReadonlyArray<RunId>> = [];
+  const layer = layerFor({
+    projection: Effect.succeed({
+      ...projection,
+      checkpoints: [
+        { ...projection.checkpoints[0]!, runId: firstRunId, appRunOrdinal: 1, status: "missing" },
+        { ...projection.checkpoints[0]!, status: "missing" },
+      ],
+    }),
+    diffCheckpoints: () => Effect.die("a provider-owned turn must not read git"),
+    getRunFileChanges: (_threadId, runIds) => {
+      requestedRunIds.push(runIds);
+      return Effect.succeed([]);
+    },
+  });
+
+  return Effect.gen(function* () {
+    const query = yield* CheckpointDiffQuery.CheckpointDiffQuery;
+    const turn = yield* query.getTurnDiff({ threadId, fromTurnCount: 1, toTurnCount: 2 });
+    const full = yield* query.getFullThreadDiff({ threadId, toTurnCount: 2 });
+    assert.strictEqual(turn.diff, "");
+    assert.strictEqual(full.diff, "");
+    assert.deepStrictEqual(requestedRunIds, [[secondRunId], [firstRunId, secondRunId]]);
+  }).pipe(Effect.provide(layer));
+});
 
 it.effect("excludes ready checkpoints from rolled-back runs", () => {
   const projection = makeProjection();
@@ -253,23 +288,26 @@ it.effect("shares the turn and full-thread diff budget across real Git batches",
     const patchSizes: number[] = [];
     const query = yield* CheckpointDiffQuery.make.pipe(
       Effect.provide(
-        Layer.mock(ThreadManagement.ThreadManagementService)({
-          getCheckpointContext: () =>
-            Effect.succeed({
-              runs: [{ id: runId, ordinal: 1, status: "completed" }],
-              checkpointScopes: [{ id: scopeId, runId, kind: "root_run", cwd }],
-              checkpoints: [
-                {
-                  scopeId,
-                  runId,
-                  ordinalWithinScope: 1,
-                  appRunOrdinal: 1,
-                  status: "ready",
-                  ref: toCheckpointRef,
-                },
-              ],
-            }),
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProjectionStoreV2)({}),
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getCheckpointContext: () =>
+              Effect.succeed({
+                runs: [{ id: runId, ordinal: 1, status: "completed" }],
+                checkpointScopes: [{ id: scopeId, runId, kind: "root_run", cwd }],
+                checkpoints: [
+                  {
+                    scopeId,
+                    runId,
+                    ordinalWithinScope: 1,
+                    appRunOrdinal: 1,
+                    status: "ready",
+                    ref: toCheckpointRef,
+                  },
+                ],
+              }),
+          }),
+        ),
       ),
       Effect.provideService(CheckpointStore.CheckpointStore, {
         ...store,

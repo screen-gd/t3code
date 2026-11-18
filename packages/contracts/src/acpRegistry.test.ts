@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import {
   AcpRegistryManagedBinaryUninstallInput,
   AcpRegistryManagedBinaryUninstallResult,
+  isHopliteAcpCommandPath,
   officialAcpRegistryIconUrlForAgentId,
   resolveOfficialAcpRegistryIconUrl,
 } from "./acpRegistry.ts";
@@ -43,5 +44,15 @@ describe("ACP Registry contracts", () => {
       removed: false,
     });
     expect(() => decodeUninstallInput({ agentId: "../example-agent" })).toThrow();
+  });
+});
+
+describe("isHopliteAcpCommandPath", () => {
+  it("matches hoplite binaries by basename only", () => {
+    expect(isHopliteAcpCommandPath("hoplite")).toBe(true);
+    expect(isHopliteAcpCommandPath(" C:\\tools\\Hoplite.EXE ")).toBe(true);
+    expect(isHopliteAcpCommandPath("/usr/local/bin/hoplite.cmd")).toBe(true);
+    expect(isHopliteAcpCommandPath("hoplite-dev")).toBe(false);
+    expect(isHopliteAcpCommandPath("/hoplite/other")).toBe(false);
   });
 });

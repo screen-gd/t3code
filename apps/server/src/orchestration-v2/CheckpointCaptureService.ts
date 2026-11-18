@@ -15,6 +15,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
+import {
+  providerReportedFileDiffs,
+  providerReportedFileSummaries,
+} from "../checkpointing/ProviderReportedDiff.ts";
 import * as CheckpointService from "./CheckpointService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -65,8 +69,17 @@ export const layer: Layer.Layer<
       readonly runId: RunId;
       readonly scopeId: CheckpointScopeId;
     }) {
-      const { run, rootNode, scope, providerThread, preservedCheckpointOrdinals, sideChat } =
-        yield* projections.getCheckpointCaptureContext(input.threadId, input);
+      const {
+        run,
+        rootNode,
+        scope,
+        providerThread,
+        preservedCheckpointOrdinals,
+        sideChat,
+        providerOwnsWorkspace,
+      } = yield* projections.getCheckpointCaptureContext(input.threadId, input);
+      // A local snapshot of a provider-owned workspace would record, and on rewind restore, the user's own edits.
+      const skipSnapshot = sideChat || providerOwnsWorkspace;
       // Stopped runs remain terminal; their checkpoint is the next message's rollback point.
       const stopped = run?.status === "interrupted" || run?.status === "cancelled";
 
@@ -111,22 +124,34 @@ export const layer: Layer.Layer<
           ordinalWithinScope,
           nodeId: rootNode.id,
           capturedAt: run.requestedAt,
-          forceMissing: sideChat,
+          forceMissing: skipSnapshot,
         });
       const threadStartCheckpoint =
         baselineOrdinalWithinScope === 0 || isPreserved(0) ? null : yield* materializeBaseline(0);
       const baselineCheckpoint = isPreserved(baselineOrdinalWithinScope)
         ? null
         : yield* materializeBaseline(baselineOrdinalWithinScope);
-      const checkpoint = yield* checkpoints.capture({
+      const captured = yield* checkpoints.capture({
         scope,
         runId: run.id,
         nodeId: rootNode.id,
         ordinalWithinScope: run.ordinal,
         appRunOrdinal: run.ordinal,
         capturedAt,
-        forceMissing: sideChat,
+        forceMissing: skipSnapshot,
       });
+      const checkpoint = providerOwnsWorkspace
+        ? {
+            ...captured,
+            files: providerReportedFileSummaries(
+              providerReportedFileDiffs(
+                yield* projections
+                  .getRunFileChanges(input.threadId, [run.id])
+                  .pipe(Effect.orElseSucceed(() => [])),
+              ),
+            ),
+          }
+        : captured;
       // Omit delegatedCompletion to preserve cohort writes made after capture loaded the run.
       const { delegatedCompletion: _delegatedCompletion, ...runWithoutDelegatedCompletion } = run;
       const commandId = CommandId.make(`command:effect:checkpoint.capture:${run.id}`);

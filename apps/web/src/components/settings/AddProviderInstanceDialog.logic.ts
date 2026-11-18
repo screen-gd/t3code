@@ -1,4 +1,5 @@
 import { msg } from "gt-react";
+import { isHopliteAcpCommandPath } from "@t3tools/contracts";
 
 export type WizardNavigation =
   | { readonly kind: "navigate"; readonly step: number }
@@ -33,7 +34,7 @@ export const HOPLITE_LOCAL_ACP_CONFIG = {
 } as const;
 
 export function isHopliteLocalCommand(commandPath: string): boolean {
-  return /^hoplite(\.exe|\.cmd)?$/i.test(commandPath.trim().split(/[\\/]/).pop() ?? "");
+  return isHopliteAcpCommandPath(commandPath);
 }
 
 export function hopliteProjectId(args: ReadonlyArray<string>): string {

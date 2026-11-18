@@ -370,7 +370,10 @@ export default function DiffPanel({
       ignoreWhitespace: diffIgnoreWhitespace,
       cacheScope: selectedTurn ? `turn:${selectedTurn.runId}` : null,
     },
-    { enabled: isGitRepo && selectedTurn !== undefined },
+    // A turn without a local snapshot reads the provider's reported edits, git or not.
+    {
+      enabled: selectedTurn !== undefined && (isGitRepo || selectedTurn.status === "missing"),
+    },
   );
   const branchDiffPreviewInput =
     canReadFiles && isGitSelection && activeThread && activeCwd
@@ -1366,7 +1369,7 @@ export default function DiffPanel({
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           <T>Select a thread to inspect turn diffs.</T>
         </div>
-      ) : !isGitRepo && !toolCallSelection ? (
+      ) : !isGitRepo && !toolCallSelection && selectedTurn?.status !== "missing" ? (
         <div className="flex flex-1 items-center justify-center px-5 text-center text-xs text-muted-foreground/70">
           <T>Turn diffs are unavailable because this project is not a git repository.</T>
         </div>

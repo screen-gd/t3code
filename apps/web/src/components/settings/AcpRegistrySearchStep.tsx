@@ -25,6 +25,7 @@ import { serverEnvironment } from "../../state/server";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription } from "../ui/alert";
+import { HopliteLogo } from "../chat/HopliteLogo";
 import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { ScrollArea } from "../ui/scroll-area";
@@ -219,6 +220,7 @@ export function AcpRegistrySearchStep({
             type="button"
             variant="outline"
           >
+            <HopliteLogo className="size-4" />
             {HOPLITE_LABEL}
           </Button>
         ) : null}

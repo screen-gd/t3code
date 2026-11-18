@@ -194,6 +194,37 @@ describe("deriveProviderEntriesByEnvironment", () => {
     );
   });
 
+  it("marks local Hoplite commands with the bundled agent id", () => {
+    const instanceId = "hoplite";
+    const hoplite = provider({
+      provider: ProviderDriverKind.make("acpRegistry"),
+      instanceId,
+    });
+    const entryFor = (config: Readonly<Record<string, string>>) =>
+      deriveProviderEntriesByEnvironment([
+        [
+          "env",
+          [hoplite],
+          {
+            providerInstances: {
+              [ProviderInstanceId.make(instanceId)]: {
+                driver: ProviderDriverKind.make("acpRegistry"),
+                enabled: true,
+                config,
+              },
+            },
+            projectSettingsOverrides: {},
+          },
+        ] as const,
+      ])
+        .get("env")
+        ?.get(instanceId);
+    expect(
+      entryFor({ source: "local", commandPath: "C:\\bin\\hoplite.exe" })?.acpRegistryAgentId,
+    ).toBe("hoplite");
+    expect(entryFor({ source: "local", commandPath: "other" })?.acpRegistryAgentId).toBeUndefined();
+  });
+
   // regression: #7292 sidebar provider icons resolved from the wrong environment
   it("keeps same-id default instances distinct per environment", () => {
     const byEnvironment = deriveProviderEntriesByEnvironment([
