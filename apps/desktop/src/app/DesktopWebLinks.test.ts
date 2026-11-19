@@ -62,6 +62,33 @@ describe("DesktopWebLinks", () => {
     }).pipe(Effect.provide(layer));
   });
 
+  it.effect("activates a new window when a link arrives with none open", () => {
+    let activations = 0;
+    const layer = DesktopWebLinks.layer.pipe(
+      Layer.provide(
+        Layer.succeed(DesktopWindow.DesktopWindow, {
+          activate: Effect.sync(() => {
+            activations += 1;
+          }),
+        } as unknown as DesktopWindow.DesktopWindow["Service"]),
+      ),
+      Layer.provide(
+        Layer.succeed(
+          ElectronWindow.ElectronWindow,
+          ElectronWindow.ElectronWindow.of({
+            currentMainOrFirst: Effect.succeedNone,
+          } as unknown as ElectronWindow.ElectronWindow["Service"]),
+        ),
+      ),
+    );
+    return Effect.gen(function* () {
+      const webLinks = yield* DesktopWebLinks.DesktopWebLinks;
+      yield* webLinks.receive("https://example.com/reopen");
+      // The new window's renderer calls setRendererReady, which flushes the pending link.
+      assert.strictEqual(activations, 1);
+    }).pipe(Effect.provide(layer));
+  });
+
   it.effect("holds links that arrive while the web app reloads until it listens again", () => {
     const { sent, layer, reload } = makeWindow();
     return Effect.gen(function* () {

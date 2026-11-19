@@ -299,6 +299,8 @@ export const make = DesktopLifecycle.of({
           const app = yield* ElectronApp.ElectronApp;
           const state = yield* DesktopState.DesktopState;
           if (environment.platform !== "darwin" && !(yield* Ref.get(state.quitting))) {
+            // The tray keeps the app and backend alive with no window.
+            if (yield* Ref.get(state.closeToTray)) return;
             yield* app.quit;
           }
         }).pipe(Effect.withSpan("desktop.lifecycle.windowAllClosed")),

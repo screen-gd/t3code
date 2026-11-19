@@ -166,6 +166,47 @@ describe("DesktopLifecycle", () => {
     },
   );
 
+  it.effect("keeps running without a window while the tray owns the app", () =>
+    Effect.gen(function* () {
+      const appListeners = new Map<string, (...args: readonly unknown[]) => void>();
+      let quitCalls = 0;
+      const quit = Effect.sync(() => {
+        quitCalls += 1;
+      });
+      const layerEnvironment = Layer.succeed(DesktopEnvironment.DesktopEnvironment, {
+        platform: "win32",
+        isDevelopment: false,
+      } as DesktopEnvironment.DesktopEnvironment["Service"]);
+      const layer = DesktopLifecycle.layer.pipe(
+        Layer.provideMerge(layerElectronApp(appListeners, quit)),
+        Layer.provideMerge(layerElectronTheme),
+        Layer.provideMerge(layerElectronWindow()),
+        Layer.provideMerge(layerDesktopWindow()),
+        Layer.provideMerge(layerEnvironment),
+        Layer.provideMerge(DesktopShutdown.layer),
+        Layer.provideMerge(DesktopState.layer),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const lifecycle = yield* DesktopLifecycle.DesktopLifecycle;
+          const state = yield* DesktopState.DesktopState;
+          yield* lifecycle.register;
+          yield* Ref.set(state.closeToTray, true);
+
+          appListeners.get("window-all-closed")?.();
+          yield* Effect.yieldNow;
+          assert.equal(quitCalls, 0);
+
+          yield* Ref.set(state.closeToTray, false);
+          appListeners.get("window-all-closed")?.();
+          yield* Effect.yieldNow;
+          assert.equal(quitCalls, 1);
+        }),
+      ).pipe(Effect.provide(layer));
+    }),
+  );
+
   it.effect("destroys windows before waiting for backend shutdown", () =>
     Effect.gen(function* () {
       const appListeners = new Map<string, (...args: readonly unknown[]) => void>();

@@ -72,9 +72,15 @@ const make = Effect.gen(function* () {
 
   return DesktopWebLinks.of({
     receive: Effect.fn("DesktopWebLinks.receive")(function (url) {
-      return Effect.suspend(() => {
+      return Effect.gen(function* () {
         pending.push(url);
-        return flush;
+        const window = yield* electronWindow.currentMainOrFirst;
+        // With no window, activate re-creates one; its renderer calls setRendererReady, which flushes pending.
+        if (Option.isNone(window)) {
+          yield* desktopWindow.activate.pipe(Effect.ignore);
+          return;
+        }
+        yield* flush;
       });
     }),
     setRendererReady: Effect.fn("DesktopWebLinks.setRendererReady")(function (ready) {

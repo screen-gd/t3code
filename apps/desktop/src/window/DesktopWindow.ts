@@ -397,7 +397,9 @@ export const make = Effect.gen(function* () {
   const rendererHistory = yield* DesktopRendererHistory.DesktopRendererHistory;
   const backendReadyRef = yield* Ref.make(false);
   let backendHasStarted = false;
-  let mainClosedDuringStartup = false;
+  // The main window was closed before the backend started or closed to the
+  // tray; only an explicit activate reopens it.
+  let mainClosedByUser = false;
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
   const context = yield* Effect.context<DesktopWindowRuntimeServices>();
   const runFork = Effect.runForkWith(context);
@@ -829,20 +831,8 @@ export const make = Effect.gen(function* () {
     window.on("move", scheduleBoundsPersist);
     window.on("maximize", scheduleBoundsPersist);
     window.on("unmaximize", scheduleBoundsPersist);
-    const shouldHideOnClose = Effect.gen(function* () {
-      if (yield* Ref.get(desktopState.quitting)) return false;
-      return yield* Ref.get(desktopState.closeToTray);
-    });
-    let sessionEnding = false;
-    // A session-end query can be canceled; bypass the tray only once logoff is final.
-    window.on("session-end", () => {
-      sessionEnding = true;
-    });
-    window.on("close", (event) => {
+    window.on("close", () => {
       runFork(flushBoundsPersist);
-      if (sessionEnding || !runSync(shouldHideOnClose)) return;
-      event.preventDefault();
-      window.hide();
     });
 
     if (environment.platform === "darwin") {
@@ -1026,7 +1016,9 @@ export const make = Effect.gen(function* () {
     }
 
     window.on("closed", () => {
-      if (!backendHasStarted) mainClosedDuringStartup = true;
+      if (!backendHasStarted || runSync(Ref.get(desktopState.closeToTray))) {
+        mainClosedByUser = true;
+      }
       clearDevelopmentLoadRetry();
       clearBoundsPersist();
       void runPromise(electronWindow.clearMain(Option.some(window)));
@@ -1038,7 +1030,7 @@ export const make = Effect.gen(function* () {
   const createMain = Effect.gen(function* () {
     const window = yield* createWindow();
     if (Option.isSome(window)) {
-      mainClosedDuringStartup = false;
+      mainClosedByUser = false;
       yield* logWindowInfo("main window created");
     }
     return window;
@@ -1170,7 +1162,7 @@ export const make = Effect.gen(function* () {
         yield* revealMain(existingWindow.value);
         return;
       }
-      if (mainClosedDuringStartup) {
+      if (mainClosedByUser) {
         yield* ensureMain;
         return;
       }
@@ -1190,7 +1182,7 @@ export const make = Effect.gen(function* () {
       backendHasStarted = true;
       yield* Ref.set(backendReadyRef, true);
       yield* logWindowInfo("backend ready", { source: "http", url: httpBaseUrl.href });
-      if (!mainClosedDuringStartup) yield* createMainIfBackendReady;
+      if (!mainClosedByUser) yield* createMainIfBackendReady;
     }),
     handleBackendNotReady: Ref.set(backendReadyRef, false).pipe(
       Effect.withSpan("desktop.window.handleBackendNotReady"),
