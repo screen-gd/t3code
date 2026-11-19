@@ -11,6 +11,7 @@ import type * as AcpSchema from "effect-acp/compat";
 import type * as AcpProtocol from "effect-acp/protocol";
 import * as Effect from "effect/Effect";
 import * as Queue from "effect/Queue";
+import type * as Scope from "effect/Scope";
 import * as Sink from "effect/Sink";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
@@ -153,9 +154,18 @@ export const watchHopliteThreadChat = (input: {
   readonly socket: Socket.Socket;
   readonly hopliteThreadId: string;
 }): Stream.Stream<CloudTaskChatEvent, AcpError.AcpError> =>
+  watchAcpThreadChat({
+    stdio: socketStdio(input.socket),
+    hopliteThreadId: input.hopliteThreadId,
+  });
+
+export const watchAcpThreadChat = (input: {
+  readonly stdio: Effect.Effect<AcpProtocol.AcpStdio, never, Scope.Scope>;
+  readonly hopliteThreadId: string;
+}): Stream.Stream<CloudTaskChatEvent, AcpError.AcpError> =>
   Stream.callback<CloudTaskChatEvent, AcpError.AcpError>((queue) =>
     Effect.gen(function* () {
-      const acp = yield* AcpClient.make(yield* socketStdio(input.socket));
+      const acp = yield* AcpClient.make(yield* input.stdio);
       const reduce = makeChatReducer();
       yield* acp.handleSessionUpdate((notification) =>
         notification.sessionId === input.hopliteThreadId
@@ -163,6 +173,8 @@ export const watchHopliteThreadChat = (input: {
           : Effect.void,
       );
       yield* acp.agent.initialize({ protocolVersion: 1, clientCapabilities: {} });
+      // The key on the socket identifies the caller, but Hoplite still requires protocol login.
+      yield* acp.agent.authenticate({ methodId: "hoplite-api-key" });
       yield* acp.agent.loadSession({
         sessionId: input.hopliteThreadId,
         cwd: "/",
