@@ -259,6 +259,9 @@ const julesState = (state: string | undefined): SessionState => {
   }
 };
 
+const GITHUB_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const GITHUB_REPO = /^(?!\.\.?$)[A-Za-z0-9._-]{1,100}$/;
+
 const makeJules = (send: ProviderSend, failure: ProviderFailure): SessionAdapter => {
   const sessionUrl = (id: string) => `${JULES_API_BASE_URL}/sessions/${encodeURIComponent(id)}`;
   return {
@@ -282,6 +285,9 @@ const makeJules = (send: ProviderSend, failure: ProviderFailure): SessionAdapter
         .split("/");
       if (owner === undefined || name === undefined)
         return yield* failure("jules", "project_required");
+      // Both go into the request path, so only GitHub's own name formats pass.
+      if (!GITHUB_OWNER.test(owner) || !GITHUB_REPO.test(name))
+        return yield* failure("jules", "repo_unavailable");
       // Jules names a repository its GitHub app can see `sources/github/<owner>/<repo>`.
       const source = yield* send(
         "jules",

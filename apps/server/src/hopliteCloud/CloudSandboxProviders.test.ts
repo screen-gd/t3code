@@ -44,17 +44,24 @@ const makeHarness = (devinMessages: ReadonlyArray<{ type: string; message: strin
       if (request.headers.authorization !== `Bearer ${DEVIN_KEY}`) return respond(401, {});
       const route = path.slice(DEVIN_API_BASE_URL.length);
       if (route === "/sessions" && request.method === "GET") return respond(200, { sessions: [] });
-      if (route === "/sessions") return respond(200, { session_id: "devin-1", url: "u" });
-      if (route === "/sessions/devin-1" && request.method === "GET") {
+      if (route === "/sessions")
+        return respond(200, { session_id: "devin-0123456789abcdef0123456789abcdef", url: "u" });
+      if (
+        route === "/sessions/devin-0123456789abcdef0123456789abcdef" &&
+        request.method === "GET"
+      ) {
         return respond(200, {
-          session_id: "devin-1",
+          session_id: "devin-0123456789abcdef0123456789abcdef",
           title: "Fix login",
           status_enum: "blocked",
           pull_request: { url: "https://github.com/o/r/pull/9" },
           messages: devinMessages,
         });
       }
-      if (route === "/sessions/devin-1/message" || route === "/sessions/devin-1") {
+      if (
+        route === "/sessions/devin-0123456789abcdef0123456789abcdef/message" ||
+        route === "/sessions/devin-0123456789abcdef0123456789abcdef"
+      ) {
         return respond(200, null);
       }
       return respond(404, {});
@@ -147,7 +154,7 @@ it.effect(
       );
 
       const { task, runId } = yield* cloud.startTask({ prompt: "Fix login", repo: "acme/api" });
-      assert.equal(task.threadId, "devin:devin-1");
+      assert.equal(task.threadId, "devin:devin-0123456789abcdef0123456789abcdef");
       assert.isNull(runId);
       const create = harness.sent.find((request) => request.method === "POST");
       assert.deepStrictEqual(create?.body, {
@@ -223,3 +230,43 @@ it.effect("a Jules task needs a repo it can see and reports the session's pull r
     );
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect(
+  "refuses task, question and repo ids outside each provider's format before sending a key",
+  () => {
+    const harness = makeHarness([]);
+    return Effect.gen(function* () {
+      const cloud = yield* HopliteCloud.HopliteCloud;
+      yield* cloud.connect("devin", DEVIN_KEY);
+      yield* cloud.connect("jules", JULES_KEY);
+      const before = harness.sent.length;
+      for (const threadId of [
+        "..",
+        "thr_1/../../projects",
+        "devin:../../sessions",
+        "devin:devin-1",
+        "jules:77/../1",
+        "jules:..",
+      ]) {
+        assert.equal(yield* errorCode(cloud.readTask({ threadId })), "not_found", threadId);
+        assert.equal(
+          yield* errorCode(cloud.sendMessage({ threadId, message: "hi" })),
+          "not_found",
+          threadId,
+        );
+        assert.equal(yield* errorCode(cloud.stopTask({ threadId })), "not_found", threadId);
+      }
+      assert.equal(
+        yield* errorCode(
+          cloud.answerQuestion({ threadId: "thr_1", questionId: "../../stop", answer: "yes" }),
+        ),
+        "not_found",
+      );
+      assert.equal(
+        yield* errorCode(cloud.startTask({ provider: "jules", prompt: "Fix", repo: "../.." })),
+        "repo_unavailable",
+      );
+      assert.equal(harness.sent.length, before);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);

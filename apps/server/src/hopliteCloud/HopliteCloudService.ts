@@ -236,6 +236,30 @@ const messageFor = (code: HopliteCloudErrorCode, name: string): string => {
   }
 };
 
+// Task and question ids go into request paths sent with the key, so each must match
+// its provider's own format; URL-encoding alone still lets `..` through.
+const TASK_ID_FORMATS: Record<CloudSandboxProvider, RegExp> = {
+  hoplite: /^thr_[A-Za-z0-9_-]{1,128}$/,
+  devin: /^devin-[0-9a-f]{32}$/,
+  jules: /^[0-9]{1,32}$/,
+};
+const HOPLITE_QUESTION_ID_FORMAT = /^q_[A-Za-z0-9_-]{1,128}$/;
+
+const invalidId = (provider: CloudSandboxProvider, what: string) =>
+  Effect.fail(
+    new HopliteCloudError({
+      code: "not_found",
+      message: `That is not a ${PROVIDER_NAMES[provider]} ${what} id.`,
+    }),
+  );
+
+const taskOf = (taskId: string) => {
+  const task = providerOfTask(taskId);
+  return TASK_ID_FORMATS[task.provider].test(task.id)
+    ? Effect.succeed(task)
+    : invalidId(task.provider, "task");
+};
+
 const failure = (code: HopliteCloudErrorCode, provider: CloudSandboxProvider = "hoplite") =>
   new HopliteCloudError({ code, message: messageFor(code, PROVIDER_NAMES[provider]) });
 
@@ -439,7 +463,7 @@ const make = Effect.gen(function* () {
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId: taskId,
   }: HopliteCloudGetTaskInput) {
-    const { provider, id: threadId } = providerOfTask(taskId);
+    const { provider, id: threadId } = yield* taskOf(taskId);
     if (provider !== "hoplite")
       return yield* sessionOf(provider).read(yield* keyFor(provider), threadId);
     const apiKey = yield* requireKey;
@@ -552,7 +576,7 @@ const make = Effect.gen(function* () {
   const sendMessage = Effect.fn("HopliteCloud.sendMessage")(function* (
     input: HopliteCloudSendMessageInput,
   ) {
-    const { provider, id } = providerOfTask(input.threadId);
+    const { provider, id } = yield* taskOf(input.threadId);
     if (provider !== "hoplite") {
       if (input.model !== undefined) return yield* failure("model_unavailable", provider);
       yield* sessionOf(provider).sendMessage(yield* keyFor(provider), id, input.message);
@@ -575,7 +599,7 @@ const make = Effect.gen(function* () {
   const stopTask = Effect.fn("HopliteCloud.stopTask")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
-    const session = providerOfTask(threadId);
+    const session = yield* taskOf(threadId);
     if (session.provider !== "hoplite") {
       const adapter = sessionOf(session.provider);
       const apiKey = yield* keyFor(session.provider);
@@ -600,7 +624,7 @@ const make = Effect.gen(function* () {
     threadId,
     start,
   }: HopliteCloudPreviewInput) {
-    const { provider } = providerOfTask(threadId);
+    const { provider } = yield* taskOf(threadId);
     if (provider !== "hoplite") {
       return {
         status: "unsupported",
@@ -647,15 +671,17 @@ const make = Effect.gen(function* () {
     threadId,
   }: HopliteCloudGetTaskInput) {
     // Other providers take questions back as plain follow-up messages.
-    if (providerOfTask(threadId).provider !== "hoplite") return [];
+    if ((yield* taskOf(threadId)).provider !== "hoplite") return [];
     return yield* fetchQuestions(yield* requireKey, threadId);
   });
 
   const answerQuestion = Effect.fn("HopliteCloud.answerQuestion")(function* (
     input: HopliteCloudAnswerInput,
   ) {
-    const { provider } = providerOfTask(input.threadId);
+    const { provider } = yield* taskOf(input.threadId);
     if (provider !== "hoplite") return yield* failure("unsupported", provider);
+    if (!HOPLITE_QUESTION_ID_FORMAT.test(input.questionId))
+      return yield* invalidId("hoplite", "question");
     const apiKey = yield* requireKey;
     const request = HttpClientRequest.post(
       `${threadPath(input.threadId)}/questions/${encodeURIComponent(input.questionId)}`,
