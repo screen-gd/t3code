@@ -8876,6 +8876,20 @@
   "50c877d9fa8db3ec": "Copier le lien de connexion",
   "663df6ba60de573b": "Ouvrir la documentation",
   "78a1a02732fc74e8": "Se déconnecter",
+  "22f1ba5552c655a9": [
+    "Vérifie que la page de connexion affiche le code",
+    " ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    },
+    "."
+  ],
   "e53ca6f665197e44": [
     "Saisissez le code",
     " ",
@@ -8927,6 +8941,7 @@
   "65835a837c643c09": "Revenir au paramètre de l’appareil",
   "aea940c95ef946b1": "Activer {provider}",
   "74abd6f7968e9fe0": "Supprimer l’instance {instanceId}",
+  "009e2ca841fdc1ef": "cet environnement",
   "eee76b40711fd902": "Pilote",
   "21d0ef064eefa159": "Statut",
   "f31ce60f3f118c0d": "Nom affiché",
@@ -12092,5 +12107,15 @@
   "27d76249d09eb69f": "Guide de revue prêt",
   "faa3bb26abb39c93": "Échec du guide de revue",
   "b7df38b7d8792d78": "Ouvrir le guide",
-  "9e91e9a77b664e4e": "Impossible de démarrer un guide de revue"
+  "9e91e9a77b664e4e": "Impossible de démarrer un guide de revue",
+  "40a21a2d19f71308": "CLI Hoplite",
+  "e4fcf63fbf53b2a4": [
+    "Nom ou chemin de l'exécutable sur ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ]
 }

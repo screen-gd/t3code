@@ -21,6 +21,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 import * as ProviderAuthFlow from "@t3tools/provider-core/server/providerAuthFlow";
 import { normalizeAcpRegistryAuthMethods, normalizeAcpRegistryWebUrl } from "./probe.ts";
+import { isHopliteAcpCommand, parseHopliteSignInPrompt } from "./hopliteAcp.ts";
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -50,6 +51,10 @@ type Runtime = Pick<
   "initialize" | "authenticate" | "start" | "handleElicitation" | "logout"
 >;
 
+export interface RuntimeHooks {
+  readonly onStderr?: (text: string) => Effect.Effect<void, EffectAcpErrors.AcpError>;
+}
+
 export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (options: {
   readonly instanceId: ProviderInstanceId;
   readonly settings: AcpRegistrySettings;
@@ -58,6 +63,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
   readonly onChanged: (authenticated: boolean) => Effect.Effect<void>;
   readonly makeRuntime?: (
     spawn: AcpSessionRuntime.AcpSpawnInput,
+    hooks: RuntimeHooks,
   ) => Effect.Effect<Runtime, ProviderSetupError, Scope.Scope>;
 }) {
   const catalog = yield* AcpRegistrySupport.AcpRegistryCatalog;
@@ -85,7 +91,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
     );
   const makeRuntime =
     options.makeRuntime ??
-    ((spawn) =>
+    ((spawn, hooks) =>
       Effect.gen(function* () {
         const context = yield* Layer.build(
           AcpSessionRuntime.layer({
@@ -99,6 +105,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
               terminal: false,
             },
             clientInfo: { name: "t3-code-provider-auth", version: "0.0.0" },
+            ...(hooks.onStderr ? { onStderr: hooks.onStderr } : {}),
           }).pipe(
             Layer.provide(
               Layer.mergeAll(
@@ -135,7 +142,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
       if (inspected.version !== null && knownMethods?.version === inspected.version)
         return knownMethods.methods;
       const resolved = yield* resolve;
-      const runtime = yield* makeRuntime(resolved.spawn);
+      const runtime = yield* makeRuntime(resolved.spawn, {});
       const initialized = yield* runtime
         .initialize()
         .pipe(
@@ -262,11 +269,41 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
     const login = Effect.scoped(
       Effect.gen(function* () {
         const resolved = yield* resolve;
+        const isHoplite = isHopliteAcpCommand(options.settings);
+        // `hoplite acp` does a device sign-in on stderr instead of an ACP URL interaction:
+        // surface its URL and code so the user can approve in the browser while
+        // `authenticate` keeps waiting on the CLI.
+        let signInCode: string | undefined;
+        let stderrTail = "";
         const runtimeScope = yield* Scope.make();
         yield* Effect.addFinalizer(() => Scope.close(runtimeScope, Exit.void));
-        const runtime = yield* makeRuntime(resolved.spawn).pipe(
-          Effect.provideService(Scope.Scope, runtimeScope),
-        );
+        const runtime = yield* makeRuntime(
+          resolved.spawn,
+          isHoplite
+            ? {
+                onStderr: (text) =>
+                  Effect.suspend(() => {
+                    stderrTail = `${stderrTail}${text}`.slice(-4096);
+                    const prompt = parseHopliteSignInPrompt(stderrTail);
+                    if (prompt === undefined || prompt.userCode === signInCode) {
+                      return Effect.void;
+                    }
+                    signInCode = prompt.userCode;
+                    return context
+                      .setInteraction(
+                        {
+                          type: "deviceCode",
+                          id: `hoplite-${prompt.userCode}`,
+                          url: prompt.url,
+                          userCode: prompt.userCode,
+                        },
+                        () => Effect.void,
+                      )
+                      .pipe(Effect.ignore);
+                  }),
+              }
+            : {},
+        ).pipe(Effect.provideService(Scope.Scope, runtimeScope));
         yield* runtime.handleElicitation((request) =>
           Effect.gen(function* () {
             if (
@@ -308,7 +345,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
           yield* runTerminal(resolved, method, context).pipe(Effect.scoped);
           // Terminal login is a separate invocation. Reconnect after it exits so
           // the ACP process reads the credentials its login command persisted.
-          const verifiedRuntime = yield* makeRuntime(resolved.spawn);
+          const verifiedRuntime = yield* makeRuntime(resolved.spawn, {});
           yield* context.verifying;
           yield* verifiedRuntime
             .start()
@@ -336,13 +373,20 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
           // Legacy env_var methods use the secret-backed environment fields in
           // provider settings. Never send their ID to authenticate.
           yield* context.verifying;
-          yield* runtime
-            .start()
-            .pipe(
-              Effect.mapError((cause) =>
-                failure("verify", "The provider could not create a session after sign-in.", cause),
-              ),
-            );
+          // `hoplite-login` only resolves after the CLI stores its key, and a test session
+          // needs a linked Hoplite project, which says nothing about sign-in.
+          if (!isHoplite)
+            yield* runtime
+              .start()
+              .pipe(
+                Effect.mapError((cause) =>
+                  failure(
+                    "verify",
+                    "The provider could not create a session after sign-in.",
+                    cause,
+                  ),
+                ),
+              );
         }
       }),
     );
@@ -354,7 +398,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
   const logout = Effect.scoped(
     Effect.gen(function* () {
       const resolved = yield* resolve;
-      const runtime = yield* makeRuntime(resolved.spawn);
+      const runtime = yield* makeRuntime(resolved.spawn, {});
       yield* runtime.logout.pipe(
         Effect.mapError((cause) =>
           failure(

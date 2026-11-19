@@ -19,6 +19,8 @@ import * as Result from "effect/Result";
 import { Fragment, useState, type ReactElement, type ReactNode } from "react";
 import { T, useGT, useMessages, Var } from "gt-react";
 import {
+  HOPLITE_ACP_AGENT_ID,
+  isHopliteAcpConfig,
   isProviderDriverKind,
   resolveProviderInstanceEnabled,
   type ProviderInstanceConfig,
@@ -41,7 +43,10 @@ import {
 import { cn } from "../../lib/utils";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { normalizeProviderAccentColor } from "../../providerInstances";
+import {
+  normalizeProviderAccentColor,
+  providerInstanceFallbackLabel,
+} from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
@@ -68,6 +73,7 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
 import { RedactedSensitiveText } from "./RedactedSensitiveText";
 import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayout";
+import { HopliteSettingsRows } from "./HopliteSettingsRows";
 import { AcpSessionManagementSection } from "./AcpSessionManagementSection";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
@@ -733,6 +739,7 @@ interface ProviderInstanceCardProps {
   readonly isUpdating?: boolean | undefined;
   readonly onAcceptUrlAuth?: ((action: AcpRegistryUrlAuthAction) => void) | undefined;
   readonly environmentId?: EnvironmentId | undefined;
+  readonly environmentLabel?: string | undefined;
   readonly secretSources?: ReadonlyArray<SecretSource>;
   readonly projectOverride?: ProjectOverrideControl | undefined;
   readonly acpProjects?:
@@ -804,6 +811,7 @@ export function ProviderInstanceCard({
   isUpdating = false,
   onAcceptUrlAuth,
   environmentId,
+  environmentLabel,
   acpProjects = EMPTY_ACP_PROJECTS,
   secretSources = NO_SECRET_SOURCES,
   projectOverride,
@@ -855,8 +863,9 @@ export function ProviderInstanceCard({
       ? onInstallRecommended
       : onRunUpdate;
   const urlAuthAction = liveProvider?.auth.action;
+  const isHoplite = instance.driver === "acpRegistry" && isHopliteAcpConfig(instance.config);
   const displayName =
-    instance.displayName?.trim() || driverOption?.label || String(instance.driver);
+    instance.displayName?.trim() || providerInstanceFallbackLabel(instance, driverOption?.label);
   const accentColor = normalizeProviderAccentColor(instance.accentColor);
   const managedPolicy = useManagedPolicy(environmentId);
   const instanceLocks = managedInstanceLocks(managedPolicy, instance.driver, m);
@@ -864,7 +873,7 @@ export function ProviderInstanceCard({
     ? undefined
     : disallowedProviderMessage(
         managedPolicy?.organization,
-        driverOption?.label ?? String(instance.driver),
+        providerInstanceFallbackLabel(instance, driverOption?.label),
       );
   const { copyToClipboard } = useCopyToClipboard<{ providerName: string }>({
     onCopy: ({ providerName }) => {
@@ -990,7 +999,9 @@ export function ProviderInstanceCard({
       accentColor={accentColor}
       acpRegistryAgentId={
         readConfigString(instance.config, "source") === "local"
-          ? undefined
+          ? isHoplite
+            ? HOPLITE_ACP_AGENT_ID
+            : undefined
           : (readConfigString(instance.config, "agentId") ?? undefined)
       }
       acpRegistryIconUrl={
@@ -1330,15 +1341,34 @@ export function ProviderInstanceCard({
   );
 
   const runtimeFields = driverOption ? (
-    <ProviderSettingsForm
-      definition={driverOption}
-      value={instance.config}
-      idPrefix={`provider-instance-${instanceId}`}
-      variant="settings"
-      onChange={updateConfig}
-      managed={instanceLocks && { keys: instanceLocks.configKeys, reason: instanceLocks.reason }}
-      environmentId={environmentId}
-    />
+    isHoplite ? (
+      <HopliteSettingsRows
+        value={
+          instance.config !== null && typeof instance.config === "object"
+            ? (instance.config as Readonly<Record<string, unknown>>)
+            : {}
+        }
+        onChange={(next) => updateConfig(next)}
+        idPrefix={`provider-instance-${instanceId}`}
+        environmentLabel={environmentLabel ?? gt("this environment")}
+        disabled={
+          readOnly ||
+          (instanceLocks !== undefined &&
+            (instanceLocks.configKeys.has("commandPath") ||
+              instanceLocks.configKeys.has("commandArgs")))
+        }
+      />
+    ) : (
+      <ProviderSettingsForm
+        definition={driverOption}
+        value={instance.config}
+        idPrefix={`provider-instance-${instanceId}`}
+        variant="settings"
+        onChange={updateConfig}
+        managed={instanceLocks && { keys: instanceLocks.configKeys, reason: instanceLocks.reason }}
+        environmentId={environmentId}
+      />
+    )
   ) : (
     <SettingsRow
       title={gt("Driver")}
@@ -1383,7 +1413,10 @@ export function ProviderInstanceCard({
                 className="min-w-0 flex-1 @min-[32rem]/settings-row:w-56"
                 value={instance.displayName ?? ""}
                 onCommit={updateDisplayName}
-                placeholder={driverOption?.label ?? gt("Instance label")}
+                placeholder={providerInstanceFallbackLabel(
+                  instance,
+                  driverOption?.label ?? gt("Instance label"),
+                )}
                 spellCheck={false}
               />
             </div>
@@ -1439,7 +1472,9 @@ export function ProviderInstanceCard({
             {runtime ?? runtimeFields}
           </FoldedSettingsSection>
         </div>
-      ) : !driverOption || deriveProviderSettingsFields(driverOption, undefined, m).length > 0 ? (
+      ) : !driverOption ||
+        isHoplite ||
+        deriveProviderSettingsFields(driverOption, undefined, m).length > 0 ? (
         <SettingsSection
           title={gt("Runtime")}
           inert={readOnly}

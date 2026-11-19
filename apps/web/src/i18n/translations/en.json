@@ -8884,6 +8884,20 @@
   "50c877d9fa8db3ec": "Copy sign-in link",
   "663df6ba60de573b": "Open docs",
   "78a1a02732fc74e8": "Sign out",
+  "22f1ba5552c655a9": [
+    "Confirm that the sign-in page shows code",
+    " ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    },
+    "."
+  ],
   "e53ca6f665197e44": [
     "Enter code",
     " ",
@@ -8935,6 +8949,7 @@
   "65835a837c643c09": "Reset to the device setting",
   "aea940c95ef946b1": "Enable {provider}",
   "74abd6f7968e9fe0": "Delete instance {instanceId}",
+  "009e2ca841fdc1ef": "this environment",
   "eee76b40711fd902": "Driver",
   "21d0ef064eefa159": "Status",
   "f31ce60f3f118c0d": "Display name",
@@ -12101,5 +12116,15 @@
   "27d76249d09eb69f": "Review guide ready",
   "faa3bb26abb39c93": "Review guide failed",
   "b7df38b7d8792d78": "Open guide",
-  "9e91e9a77b664e4e": "Could not start a review guide"
+  "9e91e9a77b664e4e": "Could not start a review guide",
+  "40a21a2d19f71308": "Hoplite CLI",
+  "e4fcf63fbf53b2a4": [
+    "Executable name or path on ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ]
 }

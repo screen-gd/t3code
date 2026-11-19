@@ -16,6 +16,7 @@ import type { ProviderClientDefinition } from "@t3tools/provider-core/client";
 import {
   type AcpRegistrySearchAgent,
   AuthProvidersManageScope,
+  HOPLITE_ACP_AGENT_ID,
   ProviderInstanceId,
   ProviderDriverKind,
   type EnvironmentId,
@@ -43,6 +44,7 @@ import { RadioGroup } from "../ui/radio-group";
 import { toastManager } from "../ui/toast";
 import { providerClients } from "./providerDriverMeta";
 import { ProviderAccentColorPicker } from "./ProviderAccentColorPicker";
+import { HopliteSettingsRows } from "./HopliteSettingsRows";
 import { SettingsGroup } from "./SettingsGroup";
 import { SettingsRow } from "./settingsLayout";
 import { ProviderSettingsForm, deriveProviderSettingsFields } from "./ProviderSettingsForm";
@@ -52,10 +54,10 @@ import {
   ACP_REGISTRY_WIZARD_STEPS,
   HOPLITE_LABEL,
   HOPLITE_LOCAL_ACP_CONFIG,
+  HOPLITE_PROVIDER_CHOICE,
+  HOPLITE_WIZARD_STEPS,
   LOCAL_ACP_WIZARD_STEPS,
   hopliteProjectId,
-  isHopliteLocalCommand,
-  withHopliteProjectId,
   resolveAcpRegistryWizardNavigation,
   resolveWizardNavigation,
   updateProviderIdentityDraft,
@@ -97,6 +99,15 @@ function validateInstanceId(
   return null;
 }
 
+/** A card in the Add provider grid; most map a driver kind, Hoplite is its own choice. */
+interface ProviderGridOption {
+  readonly value: string;
+  readonly label: string;
+  readonly driverKind: ProviderDriverKind;
+  readonly acpRegistryAgentId?: string | undefined;
+  readonly badgeLabel?: string | undefined;
+}
+
 function ProviderOptionGrid({
   options,
   value,
@@ -104,8 +115,8 @@ function ProviderOptionGrid({
   onValueChange,
   ...labelProps
 }: {
-  readonly options: ReadonlyArray<ProviderClientDefinition>;
-  readonly value: ProviderDriverKind;
+  readonly options: ReadonlyArray<ProviderGridOption>;
+  readonly value: string;
   readonly disabled: boolean;
   readonly onValueChange: (value: string) => void;
   readonly "aria-label"?: string;
@@ -121,13 +132,14 @@ function ProviderOptionGrid({
     >
       {options.map((option) => (
         <RadioPrimitive.Root
-          key={option.driverKind}
-          value={option.driverKind}
+          key={option.value}
+          value={option.value}
           className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
         >
           <ProviderInstanceIcon
             driverKind={option.driverKind}
             displayName={option.label}
+            acpRegistryAgentId={option.acpRegistryAgentId}
             iconClassName="size-4"
           />
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
@@ -179,18 +191,37 @@ export function AddProviderInstanceDialog({
   const [addingChatGptAccount, setAddingChatGptAccount] = useState(false);
   // Drivers the administrator's policy leaves out are not offered at all.
   const managedPolicy = useManagedPolicy(environmentId);
-  const featuredDriverOptions = FEATURED_DRIVER_OPTIONS.filter((option) =>
-    isManagedDriverAllowed(managedPolicy, option.driverKind),
-  );
-  const moreDriverOptions = MORE_DRIVER_OPTIONS.filter((option) =>
-    isManagedDriverAllowed(managedPolicy, option.driverKind),
-  );
   const acpRegistryAllowed = isManagedDriverAllowed(managedPolicy, ACP_REGISTRY_DRIVER_KIND);
+  const toGridOption = (option: ProviderClientDefinition): ProviderGridOption => ({
+    value: option.driverKind,
+    label: option.label,
+    driverKind: option.driverKind,
+    badgeLabel: option.badgeLabel,
+  });
+  const featuredDriverOptions: ReadonlyArray<ProviderGridOption> = [
+    ...FEATURED_DRIVER_OPTIONS.filter((option) =>
+      isManagedDriverAllowed(managedPolicy, option.driverKind),
+    ).map(toGridOption),
+    ...(acpRegistryAllowed
+      ? [
+          {
+            value: HOPLITE_PROVIDER_CHOICE,
+            label: HOPLITE_LABEL,
+            driverKind: ACP_REGISTRY_DRIVER_KIND,
+            acpRegistryAgentId: HOPLITE_ACP_AGENT_ID,
+          },
+        ]
+      : []),
+  ];
+  const moreDriverOptions: ReadonlyArray<ProviderGridOption> = MORE_DRIVER_OPTIONS.filter(
+    (option) => isManagedDriverAllowed(managedPolicy, option.driverKind),
+  ).map(toGridOption);
   const [driver, setDriver] = useState<ProviderDriverKind>(
     () =>
       (featuredDriverOptions[0] ?? moreDriverOptions[0])?.driverKind ??
       (acpRegistryAllowed ? ACP_REGISTRY_DRIVER_KIND : DEFAULT_DRIVER_KIND),
   );
+  const [isHoplite, setIsHoplite] = useState(false);
   const [identityByDriver, setIdentityByDriver] = useState<Record<string, ProviderIdentityDraft>>(
     {},
   );
@@ -223,16 +254,23 @@ export function AddProviderInstanceDialog({
   // Searches while Show more is closed, so the fold opens on results.
   const registry = useAcpRegistrySearch(environmentId, showRegistrySearch);
   const isPreparingRegistryAgent = registry.preparingId !== null;
+  // Hoplite shares the acpRegistry driver but has its own drafts, steps, and config rows.
+  const draftKey = isHoplite ? HOPLITE_PROVIDER_CHOICE : driver;
   const defaultIdentity: ProviderIdentityDraft = {
-    label: driverOption.label,
+    label: isHoplite ? HOPLITE_LABEL : driverOption.label,
     accentColor: "",
     instanceIdOverride: null,
   };
-  const { label, accentColor, instanceIdOverride } = identityByDriver[driver] ?? defaultIdentity;
+  const { label, accentColor, instanceIdOverride } = identityByDriver[draftKey] ?? defaultIdentity;
   const instanceId =
     instanceIdOverride ??
     deriveAvailableInstanceId(
       (candidateLabel) => {
+        if (isHoplite) {
+          return !candidateLabel.trim() || candidateLabel === HOPLITE_LABEL
+            ? "hoplite"
+            : deriveInstanceId(driver, candidateLabel);
+        }
         if (!candidateLabel.trim() || candidateLabel === driverOption.label) {
           return isAcpRegistry ? `${driver}_custom` : driver;
         }
@@ -245,47 +283,76 @@ export function AddProviderInstanceDialog({
   const instanceIdError = validateInstanceId(instanceId, existingIds, m);
   const showInstanceIdError = hasAttemptedSubmit && instanceIdError !== null;
   const identityStep = 1;
-  const previewLabel = label.trim() || gt("{provider} Workspace", { provider: driverOption.label });
+  const previewLabel =
+    label.trim() ||
+    gt("{provider} Workspace", { provider: isHoplite ? HOPLITE_LABEL : driverOption.label });
 
-  const configDraft = configByDriver[driver] ?? EMPTY_CONFIG_DRAFT;
+  const configDraft = configByDriver[draftKey] ?? EMPTY_CONFIG_DRAFT;
   const isLocalAcp = isAcpRegistry && isManualAcpConfiguration && configDraft.source === "local";
   const localCommandPath =
     typeof configDraft.commandPath === "string" ? configDraft.commandPath.trim() : "";
+  const localCommandArgs = Array.isArray(configDraft.commandArgs)
+    ? configDraft.commandArgs.filter((arg): arg is string => typeof arg === "string")
+    : [];
   const manualAgentId = typeof configDraft.agentId === "string" ? configDraft.agentId.trim() : "";
-  const acpSelectionError = isLocalAcp
-    ? localCommandPath.length > 0
-      ? null
-      : gt("Executable is required.")
-    : selectedAcp !== null || (isManualAcpConfiguration && manualAgentId.length > 0)
-      ? null
-      : gt("Select an ACP or configure one manually.");
-  const wizardStepSummaries = isAcpRegistry
-    ? ([
-        isLocalAcp ? gt("Local ACP command") : (selectedAcp?.name ?? (manualAgentId || null)),
-        previewLabel,
-        null,
-      ] as const)
-    : ([driverOption.label, previewLabel, null] as const);
+  const acpSelectionError = isHoplite
+    ? null
+    : isLocalAcp
+      ? localCommandPath.length > 0
+        ? null
+        : gt("Executable is required.")
+      : selectedAcp !== null || (isManualAcpConfiguration && manualAgentId.length > 0)
+        ? null
+        : gt("Select an ACP or configure one manually.");
+  const wizardStepSummaries = isHoplite
+    ? ([HOPLITE_LABEL, previewLabel, hopliteProjectId(localCommandArgs) || null, null] as const)
+    : isAcpRegistry
+      ? ([
+          isLocalAcp ? gt("Local ACP command") : (selectedAcp?.name ?? (manualAgentId || null)),
+          previewLabel,
+          null,
+        ] as const)
+      : ([driverOption.label, previewLabel, null] as const);
+  // The step that saves the instance and shows sign-in; the rest of the wizard ends on Add.
+  const signInStep = isHoplite ? 3 : isAcpRegistry && !isLocalAcp ? 2 : null;
   const setConfigDraft = (config: Record<string, unknown> | undefined) => {
     setConfigByDriver((existing) => {
       const next = { ...existing };
       if (config === undefined || Object.keys(config).length === 0) {
-        delete next[driver];
+        delete next[draftKey];
       } else {
-        next[driver] = config;
+        next[draftKey] = config;
       }
       return next;
     });
   };
   const selectDriver = (value: string) => {
-    setDriver(ProviderDriverKind.make(value));
+    if (value === HOPLITE_PROVIDER_CHOICE) {
+      setDriver(ACP_REGISTRY_DRIVER_KIND);
+      setIsHoplite(true);
+      setSelectedAcp(null);
+      setConfigByDriver((existing) =>
+        existing[HOPLITE_PROVIDER_CHOICE]
+          ? existing
+          : {
+              ...existing,
+              [HOPLITE_PROVIDER_CHOICE]: {
+                ...HOPLITE_LOCAL_ACP_CONFIG,
+                commandArgs: [...HOPLITE_LOCAL_ACP_CONFIG.commandArgs],
+              },
+            },
+      );
+    } else {
+      setDriver(ProviderDriverKind.make(value));
+      setIsHoplite(false);
+    }
     setIsManualAcpConfiguration(false);
     setHasAttemptedSubmit(false);
   };
   const setIdentityDraft = (update: Partial<ProviderIdentityDraft>) => {
     setIdentityByDriver((existing) => ({
       ...existing,
-      [driver]: { ...(existing[driver] ?? defaultIdentity), ...update },
+      [draftKey]: { ...(existing[draftKey] ?? defaultIdentity), ...update },
     }));
   };
 
@@ -294,7 +361,7 @@ export function AddProviderInstanceDialog({
     if (navigation.kind === "blocked") {
       setHasAttemptedSubmit(true);
     }
-    if (isAcpRegistry && !isLocalAcp && navigation.kind === "navigate" && navigation.step === 2) {
+    if (signInStep !== null && navigation.kind === "navigate" && navigation.step === signInStep) {
       void handleSave();
       return;
     }
@@ -303,24 +370,29 @@ export function AddProviderInstanceDialog({
 
   const navigateToStep = (requestedStep: number) => {
     applyWizardNavigation(
-      isAcpRegistry
-        ? isLocalAcp
-          ? resolveWizardNavigation(wizardStep, requestedStep, LOCAL_ACP_WIZARD_STEPS.length, {
-              instanceIdError,
-              prerequisite: { step: 0, error: acpSelectionError },
-            })
-          : resolveAcpRegistryWizardNavigation(wizardStep, requestedStep, {
-              instanceIdError,
-              selectionError: acpSelectionError,
-            })
-        : resolveWizardNavigation(wizardStep, requestedStep, ADD_PROVIDER_WIZARD_STEPS.length, {
+      isHoplite
+        ? resolveWizardNavigation(wizardStep, requestedStep, HOPLITE_WIZARD_STEPS.length, {
             instanceIdError,
-          }),
+          })
+        : isAcpRegistry
+          ? isLocalAcp
+            ? resolveWizardNavigation(wizardStep, requestedStep, LOCAL_ACP_WIZARD_STEPS.length, {
+                instanceIdError,
+                prerequisite: { step: 0, error: acpSelectionError },
+              })
+            : resolveAcpRegistryWizardNavigation(wizardStep, requestedStep, {
+                instanceIdError,
+                selectionError: acpSelectionError,
+              })
+          : resolveWizardNavigation(wizardStep, requestedStep, ADD_PROVIDER_WIZARD_STEPS.length, {
+              instanceIdError,
+            }),
     );
   };
 
   const handleAcpPrepared = (agent: AcpRegistrySearchAgent) => {
     setDriver(ACP_REGISTRY_DRIVER_KIND);
+    setIsHoplite(false);
     const nextLabel = agent.name;
     const registryIconUrl = resolveOfficialAcpRegistryIconUrl(agent.icon);
     const nextInstanceId = deriveAvailableInstanceId(
@@ -350,6 +422,7 @@ export function AddProviderInstanceDialog({
 
   const handleManualAcpConfiguration = () => {
     setDriver(ACP_REGISTRY_DRIVER_KIND);
+    setIsHoplite(false);
     setSelectedAcp(null);
     setIsManualAcpConfiguration(true);
     setConfigByDriver((existing) => {
@@ -366,29 +439,24 @@ export function AddProviderInstanceDialog({
     setHasAttemptedSubmit(false);
   };
 
-  const handleLocalAcpConfiguration = (preset?: "hoplite") => {
+  const handleLocalAcpConfiguration = () => {
     setDriver(ACP_REGISTRY_DRIVER_KIND);
+    setIsHoplite(false);
     setSelectedAcp(null);
     setIsManualAcpConfiguration(true);
     setConfigByDriver((existing) => ({
       ...existing,
-      [ACP_REGISTRY_DRIVER_KIND]:
-        preset === "hoplite"
-          ? { ...HOPLITE_LOCAL_ACP_CONFIG, commandArgs: [...HOPLITE_LOCAL_ACP_CONFIG.commandArgs] }
-          : { source: "local", commandArgs: [] },
+      [ACP_REGISTRY_DRIVER_KIND]: { source: "local", commandArgs: [] },
     }));
     setIdentityByDriver((existing) =>
       updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
-        label: preset === "hoplite" ? HOPLITE_LABEL : gt("Local ACP"),
+        label: gt("Local ACP"),
         instanceIdOverride: null,
       }),
     );
     setLocalEnvironment([]);
     setHasAttemptedSubmit(false);
   };
-  const localCommandArgs = Array.isArray(configDraft.commandArgs)
-    ? configDraft.commandArgs.filter((arg): arg is string => typeof arg === "string")
-    : [];
 
   // A policy that owns this driver's launch settings also rules out ChatGPT's own runtime.
   const driverLocks = managedInstanceLocks(managedPolicy, driver, m);
@@ -401,8 +469,8 @@ export function AddProviderInstanceDialog({
 
     const config =
       driver === "codex"
-        ? { ...configByDriver[driver], setupMode: "existing" }
-        : (configByDriver[driver] ?? {});
+        ? { ...configByDriver[draftKey], setupMode: "existing" }
+        : (configByDriver[draftKey] ?? {});
     const hasConfig = Object.keys(config).length > 0;
     const normalizedAccentColor = normalizeProviderAccentColor(accentColor);
 
@@ -435,10 +503,10 @@ export function AddProviderInstanceDialog({
       return;
     }
     onCreated?.(brandedId, driver);
-    if (isAcpRegistry && !isLocalAcp) {
+    if (signInStep !== null) {
       setCreatedInstanceId(brandedId);
       setIsSaving(false);
-      setWizardStep(2);
+      setWizardStep(signInStep);
       return;
     }
     toastManager.add({
@@ -478,7 +546,13 @@ export function AddProviderInstanceDialog({
               currentStep={wizardStep}
               summaries={wizardStepSummaries}
               instanceIdError={instanceIdError}
-              steps={isLocalAcp ? LOCAL_ACP_WIZARD_STEPS : ACP_REGISTRY_WIZARD_STEPS}
+              steps={
+                isHoplite
+                  ? HOPLITE_WIZARD_STEPS
+                  : isLocalAcp
+                    ? LOCAL_ACP_WIZARD_STEPS
+                    : ACP_REGISTRY_WIZARD_STEPS
+              }
               disabled={isSaving || isPreparingRegistryAgent || createdInstanceId !== null}
               identityStep={1}
               prerequisite={{ step: 0, error: acpSelectionError }}
@@ -511,7 +585,7 @@ export function AddProviderInstanceDialog({
                 </div>
                 <ProviderOptionGrid
                   options={featuredDriverOptions}
-                  value={driver}
+                  value={isHoplite ? HOPLITE_PROVIDER_CHOICE : driver}
                   disabled={isPreparingRegistryAgent}
                   onValueChange={selectDriver}
                   aria-labelledby="add-instance-driver-label"
@@ -535,7 +609,7 @@ export function AddProviderInstanceDialog({
                     <div className="space-y-4 pt-4">
                       <ProviderOptionGrid
                         options={moreDriverOptions}
-                        value={driver}
+                        value={isHoplite ? HOPLITE_PROVIDER_CHOICE : driver}
                         disabled={isPreparingRegistryAgent}
                         onValueChange={selectDriver}
                         aria-label={gt("More providers")}
@@ -586,41 +660,6 @@ export function AddProviderInstanceDialog({
                               onChange={setConfigDraft}
                               environmentId={environmentId}
                             />
-                            {isLocalAcp && isHopliteLocalCommand(localCommandPath) ? (
-                              <SettingsRow
-                                title={
-                                  <label htmlFor="add-provider-hoplite-project">
-                                    <T>Hoplite project ID</T>
-                                  </label>
-                                }
-                                description={
-                                  <span id="add-provider-hoplite-project-description">
-                                    <T>
-                                      Optional. Without it, Hoplite uses the project linked to each
-                                      thread's repository.
-                                    </T>
-                                  </span>
-                                }
-                                control={
-                                  <Input
-                                    id="add-provider-hoplite-project"
-                                    aria-describedby="add-provider-hoplite-project-description"
-                                    size="sm"
-                                    className="w-full @min-[32rem]/settings-row:w-56"
-                                    value={hopliteProjectId(localCommandArgs)}
-                                    onChange={(event) =>
-                                      setConfigDraft({
-                                        ...configDraft,
-                                        commandArgs: withHopliteProjectId(
-                                          localCommandArgs,
-                                          event.target.value,
-                                        ),
-                                      })
-                                    }
-                                  />
-                                }
-                              />
-                            ) : null}
                             {isLocalAcp ? (
                               <ProviderEnvironmentSection
                                 environment={localEnvironment}
@@ -643,7 +682,6 @@ export function AddProviderInstanceDialog({
                             onPrepared={handleAcpPrepared}
                             onManualConfiguration={handleManualAcpConfiguration}
                             onLocalConfiguration={() => handleLocalAcpConfiguration()}
-                            onHopliteConfiguration={() => handleLocalAcpConfiguration("hoplite")}
                           />
                           {isAcpRegistry && hasAttemptedSubmit && acpSelectionError ? (
                             <p className="mt-2 text-2xs text-destructive">{acpSelectionError}</p>
@@ -780,6 +818,22 @@ export function AddProviderInstanceDialog({
                 />
               </SettingsGroup>
 
+              {isHoplite && wizardStep === 2 ? (
+                <SettingsGroup variant="plain">
+                  <HopliteSettingsRows
+                    value={configDraft}
+                    onChange={setConfigDraft}
+                    idPrefix="add-provider-hoplite"
+                    environmentLabel={environmentLabel}
+                    disabled={
+                      driverLocks !== undefined &&
+                      (driverLocks.configKeys.has("commandPath") ||
+                        driverLocks.configKeys.has("commandArgs"))
+                    }
+                  />
+                </SettingsGroup>
+              ) : null}
+
               {!isAcpRegistry && driverSettingsFields.length > 0 ? (
                 <SettingsGroup variant="plain" className={cn(wizardStep !== 2 && "hidden")}>
                   <ProviderSettingsForm
@@ -830,7 +884,7 @@ export function AddProviderInstanceDialog({
                     />
                   )}
                 </>
-              ) : wizardStep < (isAcpRegistry ? 1 : 2) ? (
+              ) : wizardStep < (isHoplite ? 2 : isAcpRegistry ? 1 : 2) ? (
                 <Button
                   size="sm"
                   disabled={isPreparingRegistryAgent}
@@ -846,7 +900,7 @@ export function AddProviderInstanceDialog({
                 >
                   {isSaving
                     ? gt("Adding...")
-                    : isAcpRegistry && !isLocalAcp
+                    : signInStep !== null
                       ? gt("Continue to sign-in")
                       : gt("Add instance")}
                 </Button>

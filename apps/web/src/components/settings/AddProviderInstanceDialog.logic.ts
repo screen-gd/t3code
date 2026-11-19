@@ -1,5 +1,5 @@
 import { msg } from "gt-react";
-import { isHopliteAcpCommandPath } from "@t3tools/contracts";
+import { HOPLITE_ACP_LABEL } from "@t3tools/contracts";
 
 export type WizardNavigation =
   | { readonly kind: "navigate"; readonly step: number }
@@ -22,9 +22,21 @@ export const ACP_REGISTRY_WIZARD_STEPS = [
   msg("Sign in", { $context: "wizard step" }),
 ] as const;
 export const LOCAL_ACP_WIZARD_STEPS = [PROVIDER_STEP, IDENTITY_STEP_LABEL] as const;
+export const HOPLITE_WIZARD_STEPS = [
+  PROVIDER_STEP,
+  IDENTITY_STEP_LABEL,
+  msg("Config", { $context: "wizard step" }),
+  msg("Sign in", { $context: "wizard step" }),
+] as const;
 
 /** Product name; not translated. */
-export const HOPLITE_LABEL = "Hoplite";
+export const HOPLITE_LABEL = HOPLITE_ACP_LABEL;
+
+/**
+ * Grid value for the Hoplite provider card. Not a driver kind: it selects the
+ * acpRegistry driver with Hoplite's local-command config and its own wizard path.
+ */
+export const HOPLITE_PROVIDER_CHOICE = "acpRegistry:hoplite";
 
 /** Hoplite's CLI is an ACP agent; https://hoplite.sh/docs/cli/acp */
 export const HOPLITE_LOCAL_ACP_CONFIG = {
@@ -32,10 +44,6 @@ export const HOPLITE_LOCAL_ACP_CONFIG = {
   commandPath: "hoplite",
   commandArgs: ["acp"],
 } as const;
-
-export function isHopliteLocalCommand(commandPath: string): boolean {
-  return isHopliteAcpCommandPath(commandPath);
-}
 
 export function hopliteProjectId(args: ReadonlyArray<string>): string {
   const index = args.indexOf("--project");

@@ -3360,6 +3360,15 @@
   "16bc6f6dc21e6167": "Välj en ansluten miljö.",
   "229961ee1c32a532": "Begränsade behörigheter",
   "7cc151a4ae532ee7": "Konfigurera en leverantör med inloggning i appen under Inställningar på webben eller skrivbordet.",
+  "c9bc84c300913894": [
+    "Bekräfta att inloggningssidan visar koden ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
   "e91a8efa0de1b737": [
     "Ange koden ",
     {

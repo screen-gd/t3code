@@ -2,7 +2,9 @@ import { pipe } from "effect/Function";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   HOPLITE_ACP_AGENT_ID,
-  isHopliteAcpCommandPath,
+  HOPLITE_ACP_LABEL,
+  PROVIDER_DISPLAY_NAMES,
+  isHopliteAcpConfig,
   defaultInstanceIdForDriver,
   resolveProjectProviderInstanceEnabled,
   type ModelSelection,
@@ -140,18 +142,23 @@ function applyProviderInstanceBranding(
     ? settings.providerInstances[entry.instanceId]
     : undefined;
   if (entry.driverKind !== "acpRegistry" || explicitInstance === undefined) return entry;
-  const config =
-    explicitInstance.config !== null && typeof explicitInstance.config === "object"
-      ? (explicitInstance.config as Readonly<Record<string, unknown>>)
-      : null;
-  if (config?.source === "local") {
-    if (typeof config.commandPath === "string" && isHopliteAcpCommandPath(config.commandPath)) {
-      return { ...entry, acpRegistryAgentId: HOPLITE_ACP_AGENT_ID, acpRegistryIconUrl: undefined };
-    }
-    return { ...entry, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
+  const config = explicitInstance.config;
+  if (config === null || typeof config !== "object") return entry;
+  if ("source" in config && config.source === "local") {
+    return isHopliteAcpConfig(config)
+      ? {
+          ...entry,
+          displayName:
+            entry.displayName === PROVIDER_DISPLAY_NAMES[entry.driverKind]
+              ? HOPLITE_ACP_LABEL
+              : entry.displayName,
+          acpRegistryAgentId: HOPLITE_ACP_AGENT_ID,
+          acpRegistryIconUrl: undefined,
+        }
+      : { ...entry, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
   }
-  const agentId = config?.agentId;
-  const iconUrl = config?.registryIconUrl;
+  const agentId = "agentId" in config ? config.agentId : undefined;
+  const iconUrl = "registryIconUrl" in config ? config.registryIconUrl : undefined;
   return {
     ...entry,
     ...(typeof agentId === "string" && agentId.trim()
@@ -161,6 +168,20 @@ function applyProviderInstanceBranding(
       ? { acpRegistryIconUrl: iconUrl.trim() }
       : {}),
   };
+}
+
+/**
+ * Label for an instance without a display name. Hoplite instances are their own
+ * provider, not the generic "ACP Registry" driver label.
+ */
+export function providerInstanceFallbackLabel(
+  instance: { readonly driver: string; readonly config?: unknown },
+  driverLabel: string | undefined,
+): string {
+  if (instance.driver === "acpRegistry" && isHopliteAcpConfig(instance.config)) {
+    return HOPLITE_ACP_LABEL;
+  }
+  return driverLabel ?? String(instance.driver);
 }
 
 /** Picker order: each driver's default instance first, then its custom instances. */

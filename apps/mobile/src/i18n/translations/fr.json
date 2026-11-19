@@ -3354,6 +3354,15 @@
   "16bc6f6dc21e6167": "Sélectionnez un environnement connecté.",
   "229961ee1c32a532": "Autorisations limitées",
   "7cc151a4ae532ee7": "Configurez un fournisseur avec connexion dans l’app dans les Paramètres web ou bureau.",
+  "c9bc84c300913894": [
+    "Vérifie que la page de connexion affiche le code ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
   "e91a8efa0de1b737": [
     "Saisissez le code ",
     {

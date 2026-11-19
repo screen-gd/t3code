@@ -3354,6 +3354,15 @@
   "16bc6f6dc21e6167": "Selecione um ambiente conectado.",
   "229961ee1c32a532": "Permissões limitadas",
   "7cc151a4ae532ee7": "Configure um provedor com login no app nas Configurações da web ou do desktop.",
+  "c9bc84c300913894": [
+    "Confirme se a página de login mostra o código ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ],
   "e91a8efa0de1b737": [
     "Digite o código ",
     {

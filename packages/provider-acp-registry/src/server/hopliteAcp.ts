@@ -16,6 +16,44 @@ export function isHopliteAcpCommand(settings: AcpRegistrySettings): boolean {
   return settings.source === "local" && isHopliteAcpCommandPath(settings.commandPath);
 }
 
+const HOPLITE_SIGN_IN_REQUIRED =
+  /not signed in to Hoplite|signing in to Hoplite|rejected the stored CLI key/i;
+
+// The CLI prints "visit https://…/device?user_code=CODE" then "confirm the code CODE".
+// Match the last pair in the accumulated text: a retry prints a fresh code.
+const HOPLITE_SIGN_IN_PROMPT = /visit\s+(\S+)[\s\S]*?confirm the code\s+([A-Za-z0-9-]+)/g;
+
+const HOPLITE_USER_CODE = /^[A-Za-z0-9-]{4,64}$/;
+
+/** The CLI says a sign-in is starting or needed before it can serve sessions. */
+export function isHopliteSignInRequired(text: string): boolean {
+  return HOPLITE_SIGN_IN_REQUIRED.test(text);
+}
+
+/**
+ * The device sign-in Hoplite's CLI writes to stderr while `authenticate` or `session/new` waits
+ * on browser approval, parsed from an accumulated tail (chunks may split any line). Only the last
+ * printed code counts, and only an https page is safe to show the user.
+ */
+export function parseHopliteSignInPrompt(
+  text: string,
+): { readonly url: string; readonly userCode: string } | undefined {
+  let last: RegExpMatchArray | undefined;
+  for (const match of text.matchAll(HOPLITE_SIGN_IN_PROMPT)) {
+    last = match;
+  }
+  const [, urlText, userCode] = last ?? [];
+  if (urlText === undefined || userCode === undefined || !HOPLITE_USER_CODE.test(userCode)) {
+    return undefined;
+  }
+  try {
+    const url = new URL(urlText);
+    return url.protocol === "https:" ? { url: url.href, userCode } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)

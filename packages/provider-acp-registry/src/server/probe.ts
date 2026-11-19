@@ -21,7 +21,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Result from "effect/Result";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
-import type * as EffectAcpErrors from "effect-acp/errors";
+import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/compat";
 
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
@@ -37,6 +37,7 @@ import {
 } from "@t3tools/provider-acp/server/sessionConfig";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
+import { isHopliteAcpCommand, isHopliteSignInRequired } from "./hopliteAcp.ts";
 
 const MAX_AUTH_METHODS = 32;
 const MAX_MODELS = 256;
@@ -425,6 +426,13 @@ export const probeAcpRegistryConfiguration = Effect.fn("AcpRegistryProbe.probeCo
       const runtimeCoordinator = yield* Effect.serviceOption(
         AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator,
       );
+      const initialized = yield* Deferred.make<void>();
+      const isHoplite = isHopliteAcpCommand(input.settings);
+      // `hoplite acp` starts a browser sign-in on session/new while signed out; a background
+      // probe must never do that. Its sign-in text goes to stderr, so once it appears the
+      // probe fails as authentication-required (after initialize, so the advertised sign-in
+      // methods reach the snapshot) and the runtime kills the waiting CLI.
+      let hopliteStderrTail = "";
       const runtimeContext = yield* Layer.build(
         AcpSessionRuntime.layer({
           spawn: resolved.spawn,
@@ -444,7 +452,26 @@ export const probeAcpRegistryConfiguration = Effect.fn("AcpRegistryProbe.probeCo
                 command: resolved.spawn.command,
                 args: resolved.spawn.args,
               }),
-            ),
+            ).pipe(Effect.andThen(Deferred.succeed(initialized, undefined))),
+          ...(isHoplite
+            ? {
+                onStderr: (text: string) =>
+                  Effect.suspend(() => {
+                    hopliteStderrTail = `${hopliteStderrTail}${text}`.slice(-4096);
+                    if (!isHopliteSignInRequired(hopliteStderrTail)) return Effect.void;
+                    return Deferred.await(initialized).pipe(
+                      Effect.timeoutOption("2 seconds"),
+                      Effect.andThen(
+                        Effect.fail(
+                          EffectAcpErrors.AcpRequestError.authRequired(
+                            "Not signed in to Hoplite. Sign in from this provider's settings.",
+                          ),
+                        ),
+                      ),
+                    );
+                  }),
+              }
+            : {}),
           ...(input.settings.authMethodId ? { authMethodId: input.settings.authMethodId } : {}),
         }).pipe(
           Layer.provide(

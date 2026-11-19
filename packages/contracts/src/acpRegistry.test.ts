@@ -5,6 +5,7 @@ import {
   AcpRegistryManagedBinaryUninstallInput,
   AcpRegistryManagedBinaryUninstallResult,
   isHopliteAcpCommandPath,
+  isHopliteAcpConfig,
   officialAcpRegistryIconUrlForAgentId,
   resolveOfficialAcpRegistryIconUrl,
 } from "./acpRegistry.ts";
@@ -54,5 +55,27 @@ describe("isHopliteAcpCommandPath", () => {
     expect(isHopliteAcpCommandPath("/usr/local/bin/hoplite.cmd")).toBe(true);
     expect(isHopliteAcpCommandPath("hoplite-dev")).toBe(false);
     expect(isHopliteAcpCommandPath("/hoplite/other")).toBe(false);
+  });
+});
+
+describe("isHopliteAcpConfig", () => {
+  it("matches a local config whose executable is Hoplite", () => {
+    expect(isHopliteAcpConfig({ source: "local", commandPath: "hoplite" })).toBe(true);
+    expect(
+      isHopliteAcpConfig({
+        source: "local",
+        commandPath: "C:\\tools\\hoplite.exe",
+        commandArgs: ["acp"],
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects registry configs, other executables, and non-objects", () => {
+    expect(isHopliteAcpConfig({ source: "registry", commandPath: "hoplite" })).toBe(false);
+    expect(isHopliteAcpConfig({ source: "local", commandPath: "dsh" })).toBe(false);
+    expect(isHopliteAcpConfig({ source: "local", commandPath: 42 })).toBe(false);
+    expect(isHopliteAcpConfig({ source: "local" })).toBe(false);
+    expect(isHopliteAcpConfig(null)).toBe(false);
+    expect(isHopliteAcpConfig("hoplite")).toBe(false);
   });
 });

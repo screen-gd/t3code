@@ -46,6 +46,7 @@ import { msg, T, useGT, useMessages, Var } from "gt-react";
 import { m as resolveNow, type MessageResolver } from "../../i18n/messages";
 
 import { isDesktopLocalConnectionTarget } from "../../connection/desktopLocal";
+import { providerInstanceFallbackLabel } from "../../providerInstances";
 import {
   useEnvironmentSettings,
   usePersistEnvironmentProviderInstanceMutation,
@@ -139,8 +140,7 @@ import {
 function providerInstanceName(instance: ProviderInstanceConfig): string {
   return (
     instance.displayName?.trim() ||
-    providerClients.get(instance.driver)?.label ||
-    String(instance.driver)
+    providerInstanceFallbackLabel(instance, providerClients.get(instance.driver)?.label)
   );
 }
 
@@ -1350,7 +1350,7 @@ function ProviderInstanceRow({
   const favoriteModels = Arr.filterMap(favorites, (favorite) =>
     favorite.provider === instanceId ? Result.succeed(favorite.model) : Result.failVoid,
   );
-  const resetLabel = driverOption?.label ?? String(driver);
+  const resetLabel = providerInstanceFallbackLabel(instance, driverOption?.label);
   const projectOverride = showProjectOverride
     ? {
         value: projectOverrideValue,
@@ -1371,6 +1371,7 @@ function ProviderInstanceRow({
   return (
     <ProviderInstanceCard
       environmentId={environmentId}
+      environmentLabel={environmentLabel}
       secretSources={secretSources}
       acpProjects={acpProjects}
       projectOverride={projectOverride}

@@ -8874,6 +8874,20 @@
   "50c877d9fa8db3ec": "Copiar enlace de inicio de sesión",
   "663df6ba60de573b": "Abrir documentación",
   "78a1a02732fc74e8": "Cerrar sesión",
+  "22f1ba5552c655a9": [
+    "Confirma que la página de inicio de sesión muestra el código",
+    " ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    },
+    "."
+  ],
   "e53ca6f665197e44": [
     "Introduce el código",
     " ",
@@ -8925,6 +8939,7 @@
   "65835a837c643c09": "Restablecer al ajuste del dispositivo",
   "aea940c95ef946b1": "Activar {provider}",
   "74abd6f7968e9fe0": "Eliminar la instancia {instanceId}",
+  "009e2ca841fdc1ef": "este entorno",
   "eee76b40711fd902": "Controlador",
   "21d0ef064eefa159": "Estado",
   "f31ce60f3f118c0d": "Nombre visible",
@@ -12087,5 +12102,15 @@
   "27d76249d09eb69f": "Guía de revisión lista",
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
-  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión"
+  "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
+  "40a21a2d19f71308": "CLI de Hoplite",
+  "e4fcf63fbf53b2a4": [
+    "Nombre o ruta del ejecutable en ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ]
 }

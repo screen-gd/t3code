@@ -8882,6 +8882,20 @@
   "50c877d9fa8db3ec": "Kopiera inloggningslänk",
   "663df6ba60de573b": "Öppna dokumentation",
   "78a1a02732fc74e8": "Logga ut",
+  "22f1ba5552c655a9": [
+    "Bekräfta att inloggningssidan visar koden",
+    " ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    },
+    "."
+  ],
   "e53ca6f665197e44": [
     "Ange koden",
     " ",
@@ -8933,6 +8947,7 @@
   "65835a837c643c09": "Återställ till enhetens inställning",
   "aea940c95ef946b1": "Aktivera {provider}",
   "74abd6f7968e9fe0": "Ta bort instansen {instanceId}",
+  "009e2ca841fdc1ef": "den här miljön",
   "eee76b40711fd902": "Drivrutin",
   "21d0ef064eefa159": "Status",
   "f31ce60f3f118c0d": "Visningsnamn",
@@ -12099,5 +12114,15 @@
   "27d76249d09eb69f": "Granskningsguiden är klar",
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
-  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide"
+  "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
+  "40a21a2d19f71308": "Hoplite CLI",
+  "e4fcf63fbf53b2a4": [
+    "Körbart namn eller sökväg på ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ]
 }

@@ -14,7 +14,7 @@ import type * as AcpSchema from "effect-acp/compat";
 import { AcpRequestError } from "effect-acp/errors";
 
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
-import { formatFailureDetail, makeAcpRegistryAuth } from "./auth.ts";
+import { formatFailureDetail, makeAcpRegistryAuth, type RuntimeHooks } from "./auth.ts";
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 
@@ -57,12 +57,21 @@ const catalog: AcpRegistrySupport.AcpRegistryCatalog["Service"] = {
   uninstallManagedBinary: () => Effect.die("unused"),
 };
 
+const HOPLITE_SIGN_IN_STDERR = [
+  "hoplite acp: signing in to Hoplite: opening your browser (the address follows if it does not open)",
+  "Opening your browser to sign in to Hoplite…",
+  "  If it does not open, visit https://hoplite.sh/device?user_code=YML8ANAY",
+  "  and confirm the code YML8ANAY",
+  "Keep this terminal open; waiting for browser approval…",
+].join("\n");
+
 const makeHarness = (
   method: AcpSchema.AuthMethod,
   failVerification = false,
   settings = decodeSettings({ agentId: "test-agent" }),
   providerInstanceId = instanceId,
   authenticateError?: AcpRequestError,
+  authenticateWait?: Deferred.Deferred<void>,
 ) =>
   Effect.gen(function* () {
     const verify = yield* Deferred.make<void>();
@@ -88,7 +97,7 @@ const makeHarness = (
         Effect.sync(() => {
           changed.push(value);
         }),
-      makeRuntime: () =>
+      makeRuntime: (_spawn: unknown, hooks: RuntimeHooks) =>
         Effect.gen(function* () {
           const id = ++runtimes;
           yield* Effect.addFinalizer(() =>
@@ -116,7 +125,9 @@ const makeHarness = (
                 if (authenticateError !== undefined) {
                   return yield* authenticateError;
                 }
-                if (elicitation)
+                if (hooks.onStderr) yield* hooks.onStderr(HOPLITE_SIGN_IN_STDERR);
+                if (authenticateWait) yield* Deferred.await(authenticateWait);
+                if (elicitation && hooks.onStderr === undefined)
                   yield* elicitation(
                     {
                       mode: "url",
@@ -384,6 +395,37 @@ it.effect("surfaces the agent error message when authenticate fails with AcpRequ
       "The ACP agent could not complete sign-in. Connect to the VPN, then sign in again.",
     );
     assert.deepEqual(h.changed, []);
+  }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+);
+
+it.effect("publishes Hoplite's device sign-in prompt and skips the verification session", () =>
+  Effect.gen(function* () {
+    const gate = yield* Deferred.make<void>();
+    const h = yield* makeHarness(
+      {
+        id: "hoplite-login",
+        name: "Sign in to Hoplite",
+        description: "Opens your browser to sign in to Hoplite.",
+      },
+      false,
+      decodeSettings({ source: "local", commandPath: "hoplite", commandArgs: ["acp"] }),
+      instanceId,
+      undefined,
+      gate,
+    );
+    yield* h.controller.start("owner", Effect.void, "hoplite-login");
+    const waiting = yield* h.state((value) => value.interaction?.type === "deviceCode");
+    assert.deepEqual(waiting.interaction, {
+      type: "deviceCode",
+      id: "hoplite-YML8ANAY",
+      url: "https://hoplite.sh/device?user_code=YML8ANAY",
+      userCode: "YML8ANAY",
+    });
+    yield* Deferred.succeed(gate, undefined);
+    yield* h.phase("succeeded");
+    assert.deepEqual(h.authenticated, ["hoplite-login"]);
+    assert.deepEqual(h.started, []);
+    assert.deepEqual(h.changed, [true]);
   }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 

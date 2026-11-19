@@ -34,9 +34,11 @@ In **Settings → Providers → Add provider**, select **Show more**, then **Loc
 name or path on the selected environment, add one literal argument per row, and choose a display
 name. For DeepSeek Harness, use `dsh` with arguments `--profile` and `acp`.
 
-For Hoplite, select **Hoplite** instead. It runs `hoplite acp` from the
-[Hoplite CLI](https://hoplite.sh/docs/cli/acp); the first thread opens your browser to sign in. Each
-thread uses the Hoplite project linked to its repository unless you enter a project ID.
+Hoplite has its own card in **Add provider**. It runs `hoplite acp` from the
+[Hoplite CLI](https://hoplite.sh/docs/cli/acp) on the selected environment, so the Hoplite CLI must be
+installed there. Sign-in opens Hoplite's page in your browser and shows Hoplite's code in T3 Code so
+you can confirm it matches before approving. The **Config** step takes an optional Hoplite project
+ID; without one, each thread uses the Hoplite project linked to its repository.
 
 Local commands require no registry entry or download. Environment overrides apply to the command;
 credentials and skills remain managed by the installed agent or its wrapper. Models and reasoning

@@ -356,6 +356,17 @@ export class AcpRegistryOperationError extends Schema.TaggedError<AcpRegistryOpe
  */
 export const HOPLITE_ACP_AGENT_ID = "hoplite";
 
+/** Product name; not translated. */
+export const HOPLITE_ACP_LABEL = "Hoplite";
+
 export function isHopliteAcpCommandPath(commandPath: string): boolean {
   return /^hoplite(\.exe|\.cmd)?$/i.test(commandPath.trim().split(/[\\/]/).pop() ?? "");
+}
+
+/** A provider instance's stored config targets the Hoplite CLI as a local ACP command. */
+export function isHopliteAcpConfig(config: unknown): boolean {
+  if (typeof config !== "object" || config === null) return false;
+  if (!("source" in config) || config.source !== "local") return false;
+  if (!("commandPath" in config) || typeof config.commandPath !== "string") return false;
+  return isHopliteAcpCommandPath(config.commandPath);
 }

@@ -13,6 +13,7 @@ import {
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
   isProviderInstancePickerReady,
+  providerInstanceFallbackLabel,
   resolveDefaultProviderModelSelection,
   resolveSelectableProviderInstance,
   shouldShowInstanceBadge,
@@ -70,6 +71,27 @@ describe("isProviderInstancePickerReady", () => {
 
     expect(entry?.status).toBe("ready");
     expect(entry && isProviderInstancePickerReady(entry)).toBe(false);
+  });
+});
+
+describe("providerInstanceFallbackLabel", () => {
+  it("names a local Hoplite command Hoplite instead of the generic driver label", () => {
+    const hoplite = { source: "local", commandPath: "hoplite", commandArgs: ["acp"] };
+    expect(
+      providerInstanceFallbackLabel({ driver: "acpRegistry", config: hoplite }, "ACP Registry"),
+    ).toBe("Hoplite");
+    expect(
+      providerInstanceFallbackLabel(
+        { driver: "acpRegistry", config: { source: "local", commandPath: "other" } },
+        "ACP Registry",
+      ),
+    ).toBe("ACP Registry");
+    expect(
+      providerInstanceFallbackLabel({ driver: "acpRegistry", config: hoplite }, undefined),
+    ).toBe("Hoplite");
+    expect(providerInstanceFallbackLabel({ driver: "codex", config: undefined }, "Codex")).toBe(
+      "Codex",
+    );
   });
 });
 

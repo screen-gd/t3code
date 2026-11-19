@@ -3359,6 +3359,15 @@
   "16bc6f6dc21e6167": "Wähle eine verbundene Umgebung.",
   "229961ee1c32a532": "Eingeschränkte Berechtigungen",
   "7cc151a4ae532ee7": "Konfiguriere einen Anbieter mit In-App-Anmeldung in den Einstellungen im Web oder auf dem Desktop.",
+  "c9bc84c300913894": [
+    "Bestätige, dass die Anmeldeseite den Code ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    " anzeigt."
+  ],
   "e91a8efa0de1b737": [
     "Gib den Code ",
     {

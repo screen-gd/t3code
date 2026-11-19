@@ -8876,6 +8876,20 @@
   "50c877d9fa8db3ec": "Anmeldelink kopieren",
   "663df6ba60de573b": "Dokumentation öffnen",
   "78a1a02732fc74e8": "Abmelden",
+  "22f1ba5552c655a9": [
+    "Bestätige, dass die Anmeldeseite den Code",
+    " ",
+    {
+      "t": "code",
+      "i": 1,
+      "c": {
+        "i": 2,
+        "k": "_gt_value_2",
+        "v": "v"
+      }
+    },
+    " anzeigt."
+  ],
   "e53ca6f665197e44": [
     "Gib den Code",
     " ",
@@ -8927,6 +8941,7 @@
   "65835a837c643c09": "Auf die Geräteeinstellung zurücksetzen",
   "aea940c95ef946b1": "{provider} aktivieren",
   "74abd6f7968e9fe0": "Instanz {instanceId} löschen",
+  "009e2ca841fdc1ef": "dieser Umgebung",
   "eee76b40711fd902": "Treiber",
   "21d0ef064eefa159": "Status",
   "f31ce60f3f118c0d": "Anzeigename",
@@ -12092,5 +12107,15 @@
   "27d76249d09eb69f": "Review-Leitfaden bereit",
   "faa3bb26abb39c93": "Review-Leitfaden fehlgeschlagen",
   "b7df38b7d8792d78": "Leitfaden öffnen",
-  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden"
+  "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
+  "40a21a2d19f71308": "Hoplite CLI",
+  "e4fcf63fbf53b2a4": [
+    "Programmname oder Pfad auf ",
+    {
+      "i": 1,
+      "k": "_gt_value_1",
+      "v": "v"
+    },
+    "."
+  ]
 }

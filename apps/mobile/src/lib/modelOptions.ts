@@ -15,7 +15,7 @@ import type {
 } from "@t3tools/contracts";
 import {
   HOPLITE_ACP_AGENT_ID,
-  isHopliteAcpCommandPath,
+  isHopliteAcpConfig,
   isManagedDriverAllowed,
   isProviderDriverKind,
   resolveProjectProviderInstanceEnabled,
@@ -348,11 +348,7 @@ export function buildModelOptions(
     if (configValue === null || typeof configValue !== "object") return undefined;
     const agentId = "agentId" in configValue ? configValue.agentId : undefined;
     if ("source" in configValue && configValue.source === "local") {
-      return "commandPath" in configValue &&
-        typeof configValue.commandPath === "string" &&
-        isHopliteAcpCommandPath(configValue.commandPath)
-        ? HOPLITE_ACP_AGENT_ID
-        : undefined;
+      return isHopliteAcpConfig(configValue) ? HOPLITE_ACP_AGENT_ID : undefined;
     }
     return typeof agentId === "string" ? agentId.trim() || undefined : undefined;
   };

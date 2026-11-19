@@ -8,6 +8,8 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import {
   AuthProvidersManageScope,
+  HOPLITE_ACP_LABEL,
+  isHopliteAcpConfig,
   isManagedDriverAllowed,
   type ProviderAuthResponse,
   type ServerProvider,
@@ -241,7 +243,10 @@ function ProviderAccount({
       />
     );
   }
-  const name = provider.displayName ?? provider.driver;
+  const isHoplite =
+    provider.driver === "acpRegistry" &&
+    isHopliteAcpConfig(environment.serverConfig.settings.providerInstances[instanceId]?.config);
+  const name = provider.displayName ?? (isHoplite ? HOPLITE_ACP_LABEL : provider.driver);
   const email = signedIn && !active && provider.enabled ? provider.auth.email?.trim() : undefined;
   const methods = state?.methods ?? [];
   // The status line says why a provider that is missing or turned off can't sign in.
@@ -447,9 +452,16 @@ function ProviderAccount({
         <View className="gap-2 px-4 pb-3">
           {interaction?.type === "deviceCode" ? (
             <Text selectable className="text-foreground">
-              <T>
-                Enter code <Var>{interaction.userCode}</Var> on the sign-in page.
-              </T>
+              {/* A URL with the code built in, like Hoplite's, is pre-confirmed on its page. */}
+              {interaction.url.includes(interaction.userCode) ? (
+                <T>
+                  Confirm that the sign-in page shows code <Var>{interaction.userCode}</Var>.
+                </T>
+              ) : (
+                <T>
+                  Enter code <Var>{interaction.userCode}</Var> on the sign-in page.
+                </T>
+              )}
             </Text>
           ) : null}
           {interaction?.type === "terminal" ? (

@@ -3,12 +3,81 @@ import { acpToolCallDiffPatch, acpToolCallSnippetEdit } from "@t3tools/provider-
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as Effect from "effect/Effect";
 
-import { normalizeHopliteToolCall, rollbackHopliteSession } from "./hopliteAcp.ts";
+import {
+  isHopliteSignInRequired,
+  normalizeHopliteToolCall,
+  parseHopliteSignInPrompt,
+  rollbackHopliteSession,
+} from "./hopliteAcp.ts";
 
 const tool = (content: ReadonlyArray<unknown>, meta?: unknown) => ({
   toolCallId: "call_1",
   kind: "edit",
   data: { content, ...(meta === undefined ? {} : { meta }) },
+});
+
+describe("parseHopliteSignInPrompt", () => {
+  const stderr = [
+    "hoplite acp: signing in to Hoplite: opening your browser (the address follows if it does not open)",
+    "Opening your browser to sign in to Hoplite…",
+    "  If it does not open, visit https://hoplite.sh/device?user_code=YML8ANAY",
+    "  and confirm the code YML8ANAY",
+    "Keep this terminal open; waiting for browser approval…",
+  ].join("\n");
+
+  it("parses the device sign-in prompt the CLI writes to stderr", () => {
+    expect(parseHopliteSignInPrompt(stderr)).toEqual({
+      url: "https://hoplite.sh/device?user_code=YML8ANAY",
+      userCode: "YML8ANAY",
+    });
+  });
+
+  it("parses a tail that starts mid-line and uses CRLF", () => {
+    const tail = `…(the address follows if it does not open)\r\n  If it does not open, visit https://hoplite.sh/device?user_code=YML8ANAY\r\n  and confirm the code YML8ANAY\r\nKeep this terminal open`;
+    expect(parseHopliteSignInPrompt(tail)).toEqual({
+      url: "https://hoplite.sh/device?user_code=YML8ANAY",
+      userCode: "YML8ANAY",
+    });
+  });
+
+  it("returns the last printed code when the CLI retries", () => {
+    const retried = `${stderr}\n  If it does not open, visit https://hoplite.sh/device?user_code=NEWCODE1\n  and confirm the code NEWCODE1\n`;
+    expect(parseHopliteSignInPrompt(retried)?.userCode).toBe("NEWCODE1");
+  });
+
+  it("rejects non-https addresses and malformed output", () => {
+    expect(
+      parseHopliteSignInPrompt(
+        "visit http://hoplite.sh/device?user_code=YML8ANAY\n  and confirm the code YML8ANAY",
+      ),
+    ).toBeUndefined();
+    expect(
+      parseHopliteSignInPrompt("visit notaurl\n  and confirm the code YML8ANAY"),
+    ).toBeUndefined();
+    expect(
+      parseHopliteSignInPrompt(
+        "visit https://hoplite.sh/device?user_code=YML8ANAY\n  and confirm the code !!bad!!",
+      ),
+    ).toBeUndefined();
+    expect(parseHopliteSignInPrompt("unrelated stderr output")).toBeUndefined();
+  });
+});
+
+describe("isHopliteSignInRequired", () => {
+  it.each([
+    "hoplite acp: not signed in to Hoplite (not signed in to Hoplite; run `hoplite login`); the first session signs in",
+    "hoplite acp: signing in to Hoplite: opening your browser (the address follows if it does not open)",
+    "Hoplite rejected the stored CLI key (401); signing in again",
+  ])("matches the CLI's sign-in stderr: %s", (line) => {
+    expect(isHopliteSignInRequired(line)).toBe(true);
+  });
+
+  it.each(["hoplite acp: ready", "No Hoplite project for /repo", "some other warning"])(
+    "ignores unrelated stderr: %s",
+    (line) => {
+      expect(isHopliteSignInRequired(line)).toBe(false);
+    },
+  );
 });
 
 describe("normalizeHopliteToolCall", () => {

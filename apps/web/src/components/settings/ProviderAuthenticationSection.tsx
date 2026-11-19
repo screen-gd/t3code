@@ -368,13 +368,24 @@ export function ProviderAuthenticationSection({
         <>
           {interaction?.type === "deviceCode" ? (
             <p className="py-2 text-sm text-muted-foreground">
-              <T>
-                Enter code{" "}
-                <code className="select-all font-mono text-foreground">
-                  <Var>{interaction.userCode}</Var>
-                </code>{" "}
-                in your browser.
-              </T>
+              {/* A URL with the code built in, like Hoplite's, is pre-confirmed on its page. */}
+              {interaction.url.includes(interaction.userCode) ? (
+                <T>
+                  Confirm that the sign-in page shows code{" "}
+                  <code className="select-all font-mono text-foreground">
+                    <Var>{interaction.userCode}</Var>
+                  </code>
+                  .
+                </T>
+              ) : (
+                <T>
+                  Enter code{" "}
+                  <code className="select-all font-mono text-foreground">
+                    <Var>{interaction.userCode}</Var>
+                  </code>{" "}
+                  in your browser.
+                </T>
+              )}
             </p>
           ) : null}
           {interaction?.type === "terminal" ? (
