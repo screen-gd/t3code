@@ -188,6 +188,8 @@ export const CloudTaskChatEvent = Schema.Union([
   Schema.TaggedStruct("append", { id: Schema.String, text: Schema.String }),
   /** The history is replayed; what follows happens live. */
   Schema.TaggedStruct("live", {}),
+  /** The chat as replayed on a new connection, in place of what was shown. */
+  Schema.TaggedStruct("replace", { entries: Schema.Array(CloudTaskChatEntry) }),
 ]);
 export type CloudTaskChatEvent = typeof CloudTaskChatEvent.Type;
 

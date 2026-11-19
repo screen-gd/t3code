@@ -8,7 +8,12 @@ import * as Sink from "effect/Sink";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 
-import { makeChatReducer, watchAcpThreadChat, watchTaskChat } from "./HopliteTaskChat.ts";
+import {
+  makeChatReducer,
+  reloadOnActivity,
+  watchAcpThreadChat,
+  watchTaskChat,
+} from "./HopliteTaskChat.ts";
 
 const text = (value: string) => ({ type: "text" as const, text: value });
 
@@ -179,5 +184,42 @@ it.effect("streams only tasks delegated to Hoplite from this thread", () =>
     ).pipe(Stream.runCollect);
     assert.deepStrictEqual(events, [{ _tag: "live" }]);
     assert.deepStrictEqual(watched, ["thr_remote"]);
+  }),
+);
+
+it.effect("replays the chat as one replacement when the task has activity", () =>
+  Effect.gen(function* () {
+    const message = (id: string, role: "user" | "assistant", value: string) => ({
+      _tag: "upsert" as const,
+      entry: { _tag: "message" as const, id, role, text: value },
+    });
+    const live = { _tag: "live" as const };
+    let opened = 0;
+    // The first connection stays open, as Hoplite's does, and misses the follow-up.
+    const open = Stream.suspend(() => {
+      opened += 1;
+      return opened === 1
+        ? Stream.concat(Stream.make(message("m1", "user", "Fix login"), live), Stream.never)
+        : Stream.make(
+            message("m1", "user", "Fix login"),
+            message("m2", "user", "Also logout"),
+            message("assistant-1", "assistant", "Do"),
+            { _tag: "append" as const, id: "assistant-1", text: "ne" },
+            live,
+          );
+    });
+    const events = yield* reloadOnActivity(open, Stream.make(undefined)).pipe(Stream.runCollect);
+    assert.strictEqual(opened, 2);
+    assert.deepStrictEqual(events.slice(-2), [
+      {
+        _tag: "replace",
+        entries: [
+          message("m1", "user", "Fix login").entry,
+          message("m2", "user", "Also logout").entry,
+          message("assistant-1", "assistant", "Done").entry,
+        ],
+      },
+      live,
+    ]);
   }),
 );

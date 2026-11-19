@@ -188,6 +188,65 @@ export const watchAcpThreadChat = (input: {
     ),
   );
 
+const foldReplay = (
+  entries: ReadonlyArray<CloudTaskChatEntry>,
+  event: CloudTaskChatEvent,
+): ReadonlyArray<CloudTaskChatEntry> => {
+  switch (event._tag) {
+    case "upsert": {
+      const index = entries.findIndex((entry) => entry.id === event.entry.id);
+      if (index === -1) return [...entries, event.entry];
+      const next = entries.slice();
+      next[index] = event.entry;
+      return next;
+    }
+    case "append": {
+      const index = entries.findLastIndex((entry) => entry.id === event.id);
+      const entry = entries[index];
+      if (entry?._tag !== "message") return entries;
+      const next = entries.slice();
+      next[index] = { ...entry, text: entry.text + event.text };
+      return next;
+    }
+    case "replace":
+      return event.entries;
+    case "live":
+      return entries;
+  }
+};
+
+/** Holds a connection's replay back until it ends, then sends it as one `replace`. */
+const replayed = <E>(
+  chat: Stream.Stream<CloudTaskChatEvent, E>,
+): Stream.Stream<CloudTaskChatEvent, E> =>
+  chat.pipe(
+    Stream.mapAccum(
+      () => ({ replaying: true, entries: [] as ReadonlyArray<CloudTaskChatEntry> }),
+      (state, event) => {
+        if (!state.replaying) return [state, [event]] as const;
+        if (event._tag !== "live") {
+          return [{ replaying: true, entries: foldReplay(state.entries, event) }, []] as const;
+        }
+        const replace: CloudTaskChatEvent = { _tag: "replace", entries: state.entries };
+        return [{ replaying: false, entries: [] }, [replace, event]] as const;
+      },
+    ),
+  );
+
+/**
+ * Hoplite does not forward runs started over its REST API to an open ACP session,
+ * so each `activity` (a message sent, a run settled) replays the chat on a new
+ * connection, without the client ever showing a half-loaded chat.
+ */
+export const reloadOnActivity = <E>(
+  open: Stream.Stream<CloudTaskChatEvent, E>,
+  activity: Stream.Stream<void>,
+): Stream.Stream<CloudTaskChatEvent, E> =>
+  Stream.concat(
+    Stream.make(true),
+    Stream.map(activity, () => false),
+  ).pipe(Stream.switchMap((first) => (first ? open : replayed(open))));
+
 type ReadTask<E> = (
   input: HopliteCloudWatchTaskChatInput,
 ) => Effect.Effect<OrchestrationV2Subagent | undefined, E>;

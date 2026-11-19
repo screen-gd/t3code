@@ -28,4 +28,9 @@ it("builds a cloud task's chat from its change stream", () => {
       { _tag: "tool", id: "t", title: "Read", status: "completed" },
     ],
   });
+  const replaced = { _tag: "message" as const, id: "b", role: "user" as const, text: "Hi" };
+  expect(applyCloudTaskChatEvent(chat, { _tag: "replace", entries: [replaced] })).toEqual({
+    live: true,
+    entries: [replaced],
+  });
 });

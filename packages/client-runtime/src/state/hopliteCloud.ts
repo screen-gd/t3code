@@ -24,6 +24,8 @@ export function applyCloudTaskChatEvent(
   switch (event._tag) {
     case "live":
       return chat.live ? chat : { ...chat, live: true };
+    case "replace":
+      return { ...chat, entries: [...event.entries] };
     case "upsert": {
       const index = chat.entries.findIndex((entry) => entry.id === event.entry.id);
       if (index === -1) return { ...chat, entries: [...chat.entries, event.entry] };

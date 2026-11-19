@@ -250,7 +250,11 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
 import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
-import { resolveHopliteTask, watchTaskChat } from "./hopliteCloud/HopliteTaskChat.ts";
+import {
+  reloadOnActivity,
+  resolveHopliteTask,
+  watchTaskChat,
+} from "./hopliteCloud/HopliteTaskChat.ts";
 import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
@@ -2643,7 +2647,14 @@ export const layerWsRpc = (
           hopliteCloud.disconnect(input.provider ?? "hoplite"),
         [WS_METHODS.hopliteCloudWatchTaskChat]: (input) =>
           watchTaskChat(
-            { readTask: readDelegatedTask, watchThreadChat: hopliteCloud.watchThreadChat },
+            {
+              readTask: readDelegatedTask,
+              watchThreadChat: (hopliteThreadId) =>
+                reloadOnActivity(
+                  hopliteCloud.watchThreadChat(hopliteThreadId),
+                  hopliteTaskWatch.threadActivity(hopliteThreadId),
+                ),
+            },
             input,
           ),
         // Sent as the delegating thread, so its task card follows the new run like an agent's follow-up.

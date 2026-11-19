@@ -22,9 +22,11 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
@@ -199,6 +201,8 @@ export class HopliteTaskWatch extends Context.Service<
       input: HopliteCloudGetTaskInput,
     ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
     readonly sweep: Effect.Effect<void>;
+    /** Fires when a Hoplite thread's chat may have changed: a message, answer or stop sent, or a run settled. */
+    readonly threadActivity: (hopliteThreadId: string) => Stream.Stream<void>;
   }
 >()("t3/hopliteCloud/HopliteTaskWatch") {}
 
@@ -208,6 +212,13 @@ const make = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const random = yield* SecureRandom.SecureRandom;
+  const activity = yield* PubSub.unbounded<string>();
+  const touched = (hopliteThreadId: string) => PubSub.publish(activity, hopliteThreadId);
+  const threadActivity = (hopliteThreadId: string) =>
+    Stream.fromPubSub(activity).pipe(
+      Stream.filter((id) => id === hopliteThreadId),
+      Stream.map(() => undefined),
+    );
 
   const stored = yield* secrets.get(WATCHES_SECRET).pipe(
     Effect.map(Option.flatMap((bytes) => decodeWatches(new TextDecoder().decode(bytes)))),
@@ -357,6 +368,7 @@ const make = Effect.gen(function* () {
     // A message queued behind the active run gets no run id; the run before it is the baseline.
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const { runId } = yield* hoplite.sendMessage(input);
+    yield* touched(input.threadId);
     if (callerThreadId === undefined) return before.task;
     const taskId = yield* recordCard({
       callerThreadId,
@@ -384,6 +396,7 @@ const make = Effect.gen(function* () {
   ) {
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const answered = yield* hoplite.answerQuestion(input);
+    yield* touched(input.threadId);
     if (callerThreadId === undefined) return before.task;
     const runId = answered.runId;
     const taskId = yield* recordCard({
@@ -420,6 +433,7 @@ const make = Effect.gen(function* () {
         ] as const,
     ).pipe(Effect.tap(persist));
     const task = yield* hoplite.stopTask(input);
+    yield* touched(input.threadId);
     yield* Effect.forEach(
       dropped,
       (watch) =>
@@ -460,9 +474,13 @@ const make = Effect.gen(function* () {
     message: { readonly text: string; readonly notification: OrchestrationV2Notification },
     status: CardStatus,
   ) =>
-    watch.taskId === undefined
-      ? wake(watch, key, message)
-      : completeCard(watch.callerThreadId, watch.taskId, status, message.text, "ran-out");
+    touched(watch.hopliteThreadId).pipe(
+      Effect.andThen(
+        watch.taskId === undefined
+          ? wake(watch, key, message)
+          : completeCard(watch.callerThreadId, watch.taskId, status, message.text, "ran-out"),
+      ),
+    );
 
   const check = Effect.fnUntraced(function* (watch: HopliteTaskWatchEntry) {
     const read = yield* Effect.result(hoplite.readTask({ threadId: watch.hopliteThreadId }));
@@ -565,7 +583,14 @@ const make = Effect.gen(function* () {
 
   yield* forkParked(sweep.pipe(Effect.repeat(Schedule.spaced(SWEEP_INTERVAL))));
 
-  return HopliteTaskWatch.of({ startTask, sendMessage, answerQuestion, stopTask, sweep });
+  return HopliteTaskWatch.of({
+    startTask,
+    sendMessage,
+    answerQuestion,
+    stopTask,
+    sweep,
+    threadActivity,
+  });
 });
 
 export const layer = Layer.effect(HopliteTaskWatch, make);
