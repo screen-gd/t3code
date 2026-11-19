@@ -4,6 +4,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
 
 import type { AcpRegistryAvailableCommands } from "./probe.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
@@ -57,6 +58,34 @@ describe("AcpRegistryRuntimeCoordinator", () => {
 
       yield* Deferred.succeed(releaseForeground, undefined);
       yield* Fiber.join(foreground);
+    }).pipe(Effect.provide(AcpRegistryRuntimeCoordinator.layer)),
+  );
+
+  it.effect("starts the foreground only after an interrupted probe has torn down", () =>
+    Effect.gen(function* () {
+      const coordinator = yield* AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator;
+      const probeStarted = yield* Deferred.make<void>();
+      const probeFinalized = yield* Deferred.make<void>();
+      yield* coordinator
+        .runBackgroundProbe(
+          "hoplite",
+          Deferred.succeed(probeStarted, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(
+              Effect.sleep("1 second").pipe(
+                Effect.andThen(Deferred.succeed(probeFinalized, undefined)),
+              ),
+            ),
+          ),
+        )
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(probeStarted);
+
+      const foreground = yield* coordinator
+        .withForegroundStartup("hoplite", Deferred.isDone(probeFinalized))
+        .pipe(Effect.forkChild);
+      yield* TestClock.adjust("1 second");
+      expect(yield* Fiber.join(foreground)).toBe(true);
     }).pipe(Effect.provide(AcpRegistryRuntimeCoordinator.layer)),
   );
 

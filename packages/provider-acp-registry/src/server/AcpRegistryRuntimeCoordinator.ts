@@ -98,6 +98,20 @@ export class AcpRegistryRuntimeCoordinator extends Context.Service<
 const make = Effect.gen(function* () {
   const foregroundStarts = yield* PubSub.unbounded<string>();
   const activeForegroundCounts = yield* Ref.make(new Map<string, number>());
+  const activeProbes = yield* Ref.make(new Map<string, ReadonlySet<Deferred.Deferred<void>>>());
+  const updateActiveProbes = (
+    agentId: string,
+    settled: Deferred.Deferred<void>,
+    action: "add" | "delete",
+  ) =>
+    Ref.update(activeProbes, (current) => {
+      const probes = new Set(current.get(agentId));
+      probes[action](settled);
+      const next = new Map(current);
+      if (probes.size === 0) next.delete(agentId);
+      else next.set(agentId, probes);
+      return next;
+    });
   const availableCommandsUpdates = yield* PubSub.unbounded<AvailableCommandsUpdate>();
   const availableCommandsByInstance = yield* Ref.make(
     new Map<ProviderInstanceId, AcpRegistryAvailableCommands>(),
@@ -123,7 +137,15 @@ const make = Effect.gen(function* () {
         next.set(agentId, (next.get(agentId) ?? 0) + 1);
         return next;
       }).pipe(Effect.andThen(PubSub.publish(foregroundStarts, agentId))),
-      () => effect,
+      // A probe's agent process must be gone before the foreground one starts: agents such as
+      // Hoplite keep one sign-in per user, which a dying probe can still hold.
+      () =>
+        Ref.get(activeProbes).pipe(
+          Effect.flatMap((current) =>
+            Effect.forEach(current.get(agentId) ?? [], Deferred.await, { discard: true }),
+          ),
+          Effect.andThen(effect),
+        ),
       () =>
         Ref.update(activeForegroundCounts, (current) => {
           const next = new Map(current);
@@ -142,6 +164,14 @@ const make = Effect.gen(function* () {
       Effect.gen(function* () {
         // Subscribe first so foreground starts cannot slip between the state check and probe.
         const subscription = yield* PubSub.subscribe(foregroundStarts);
+        // Registered before the foreground check, so a foreground start either waits for this
+        // probe or this probe sees the start.
+        const settled = yield* Deferred.make<void>();
+        yield* Effect.acquireRelease(updateActiveProbes(agentId, settled, "add"), () =>
+          updateActiveProbes(agentId, settled, "delete").pipe(
+            Effect.andThen(Deferred.succeed(settled, undefined)),
+          ),
+        );
         if ((yield* Ref.get(activeForegroundCounts)).has(agentId)) {
           return Option.none();
         }
