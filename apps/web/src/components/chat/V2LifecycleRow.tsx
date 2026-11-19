@@ -1,7 +1,8 @@
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { CloudTaskChatDialog } from "./CloudTaskChatDialog";
 import { useThreadShell, useProject } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -430,17 +431,23 @@ function SubagentTimelineLink(props: {
   const remoteEnvironment = useEnvironment(remote?.environmentId ?? null);
   const navigate = useNavigate();
   const threadId = props.threadId;
+  const [chatOpen, setChatOpen] = useState(false);
+  const showsChat = remote?.service === "hoplite";
   // A task in a linked environment opens there, if this client is connected to it.
   const open =
     threadId !== null
       ? () => props.onOpenThread(threadId)
-      : remote !== undefined && remoteEnvironment !== null
-        ? () =>
-            void navigate({
-              to: "/$environmentId/$threadId",
-              params: buildThreadRouteParams(scopeThreadRef(remote.environmentId, remote.threadId)),
-            })
-        : null;
+      : showsChat
+        ? () => setChatOpen(true)
+        : remote !== undefined && remoteEnvironment !== null
+          ? () =>
+              void navigate({
+                to: "/$environmentId/$threadId",
+                params: buildThreadRouteParams(
+                  scopeThreadRef(remote.environmentId, remote.threadId),
+                ),
+              })
+          : null;
   const liveStatus = agent?.status ?? props.status;
   const status = props.event ? props.event.status : liveStatus;
   const statusLabel = props.event?.label ?? subagentStatusVisual(liveStatus).label;
@@ -546,6 +553,16 @@ function SubagentTimelineLink(props: {
           progress={agent?.progress ?? props.progress}
         />
       </ThreadHoverCardPopup>
+      {showsChat ? (
+        <CloudTaskChatDialog
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          environmentId={props.parentRef.environmentId}
+          threadId={props.parentRef.threadId}
+          taskId={props.subagentId}
+          title={props.title}
+        />
+      ) : null}
     </Tooltip>
   );
 }

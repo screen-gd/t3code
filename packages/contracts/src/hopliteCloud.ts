@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NodeId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
  * Cloud sandbox providers run coding agents in their own sandboxes through an API:
@@ -166,3 +166,34 @@ export class HopliteCloudError extends Schema.TaggedError<HopliteCloudError>()(
     message: Schema.String,
   },
 ) {}
+
+/** One entry of a cloud task's chat, as the delegating thread shows it. */
+export const CloudTaskChatEntry = Schema.Union([
+  Schema.TaggedStruct("message", {
+    id: Schema.String,
+    role: Schema.Literals(["user", "assistant"]),
+    text: Schema.String,
+  }),
+  Schema.TaggedStruct("tool", {
+    id: Schema.String,
+    title: Schema.String,
+    status: Schema.Literals(["pending", "in_progress", "completed", "failed"]),
+  }),
+]);
+export type CloudTaskChatEntry = typeof CloudTaskChatEntry.Type;
+
+/** Changes to a cloud task's chat; streamed text arrives as appends, not resent entries. */
+export const CloudTaskChatEvent = Schema.Union([
+  Schema.TaggedStruct("upsert", { entry: CloudTaskChatEntry }),
+  Schema.TaggedStruct("append", { id: Schema.String, text: Schema.String }),
+  /** The history is replayed; what follows happens live. */
+  Schema.TaggedStruct("live", {}),
+]);
+export type CloudTaskChatEvent = typeof CloudTaskChatEvent.Type;
+
+export const HopliteCloudWatchTaskChatInput = Schema.Struct({
+  /** The thread that delegated the task. */
+  threadId: ThreadId,
+  taskId: NodeId,
+});
+export type HopliteCloudWatchTaskChatInput = typeof HopliteCloudWatchTaskChatInput.Type;

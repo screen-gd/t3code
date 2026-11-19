@@ -250,6 +250,10 @@ names, follow up on it, and get its pull request back in the chat. Each
 provider bills its tasks to your account there. Jules has no API to stop a
 session, so stop those in Jules. **Disconnect** removes a provider's key.
 
+Click a Hoplite task in the chat or the thread's details to read its chat
+there, including the agent's live progress. Devin and Jules tasks show only
+their status and result.
+
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

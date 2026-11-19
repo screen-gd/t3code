@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
+import { CloudTaskChatDialog } from "./CloudTaskChatDialog";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { SectionHeaderStatus } from "../ui/collapsible-section-header";
@@ -251,10 +252,14 @@ function RemoteSubagentRow(props: {
     readonly remoteChild: OrchestrationV2RemoteTaskChild;
   };
   readonly provider: ServerProvider | undefined;
+  /** The environment of the thread that delegated it. */
+  readonly environmentId: EnvironmentId;
 }) {
   const navigate = useNavigate();
   const environment = useEnvironment(props.agent.remoteChild.environmentId);
   const { remoteChild } = props.agent;
+  const [chatOpen, setChatOpen] = useState(false);
+  const showsChat = remoteChild.service === "hoplite";
   const status = props.agent.status;
   const failed = status === "failed";
   const title = relationshipThreadTitle({
@@ -263,6 +268,16 @@ function RemoteSubagentRow(props: {
   });
   return (
     <li className="group relative flex h-8 items-center rounded-lg">
+      {showsChat ? (
+        <CloudTaskChatDialog
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          environmentId={props.environmentId}
+          threadId={props.agent.threadId}
+          taskId={props.agent.id}
+          title={title}
+        />
+      ) : null}
       <Tooltip>
         <TooltipTrigger
           delay={200}
@@ -271,8 +286,9 @@ function RemoteSubagentRow(props: {
               size="sm"
               variant="ghost"
               part="row"
-              aria-disabled={environment === null || undefined}
+              aria-disabled={(!showsChat && environment === null) || undefined}
               onClick={() => {
+                if (showsChat) return setChatOpen(true);
                 if (environment === null) return;
                 void navigate({
                   to: "/$environmentId/$threadId",
@@ -310,11 +326,13 @@ function RemoteSubagentRow(props: {
           <LineageTooltipContent
             title={title}
             hint={
-              remoteChild.service !== undefined
-                ? `Runs in ${remoteChild.label}. Its result appears here when it ends.`
-                : environment === null
-                  ? `Runs on ${remoteChild.label}. Connect to it to open the thread there.`
-                  : `Open on ${remoteChild.label}`
+              showsChat
+                ? `Runs in ${remoteChild.label}. Open to follow its chat.`
+                : remoteChild.service !== undefined
+                  ? `Runs in ${remoteChild.label}. Its result appears here when it ends.`
+                  : environment === null
+                    ? `Runs on ${remoteChild.label}. Connect to it to open the thread there.`
+                    : `Open on ${remoteChild.label}`
             }
           />
         </TooltipPopup>
@@ -951,6 +969,7 @@ export function ThreadRelationshipsPanel(props: {
                 <RemoteSubagentRow
                   key={agent.id}
                   agent={agent}
+                  environmentId={props.environmentId}
                   // Its provider instance belongs to the environment it runs in.
                   provider={providersByEnvironment
                     .get(agent.remoteChild.environmentId)

@@ -1,6 +1,7 @@
 import {
   type CloudSandboxProvider,
   type CloudSandboxProviderStatus,
+  type CloudTaskChatEvent,
   type HopliteCloudAnswerInput,
   HopliteCloudError,
   type HopliteCloudErrorCode,
@@ -23,6 +24,9 @@ import * as Schema from "effect/Schema";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
+import * as Socket from "effect/socket/Socket";
+import * as Stream from "effect/Stream";
+import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
@@ -32,6 +36,7 @@ import {
   type ProviderSend,
   type SessionProvider,
 } from "./CloudSandboxProviders.ts";
+import { HOPLITE_ACP_URL, watchHopliteThreadChat } from "./HopliteTaskChat.ts";
 
 export const HOPLITE_API_BASE_URL = "https://api.hoplite.sh";
 export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
@@ -199,6 +204,10 @@ export class HopliteCloud extends Context.Service<
     readonly answerQuestion: (
       input: HopliteCloudAnswerInput,
     ) => Effect.Effect<{ readonly runId: string | null }, HopliteCloudError>;
+    /** A Hoplite thread's chat: its recent history, then live activity until unsubscribed. */
+    readonly watchThreadChat: (
+      hopliteThreadId: string,
+    ) => Stream.Stream<CloudTaskChatEvent, HopliteCloudError>;
   }
 >()("t3/hopliteCloud/HopliteCloudService/HopliteCloud") {}
 
@@ -660,6 +669,29 @@ const make = Effect.gen(function* () {
 
   const connected = Effect.map(storedProviders, (stored) => stored.length > 0);
 
+  const watchThreadChat = (hopliteThreadId: string) =>
+    Stream.unwrap(
+      Effect.map(requireKey, (apiKey) =>
+        Stream.unwrap(
+          Socket.makeWebSocket(HOPLITE_ACP_URL, {
+            openTimeout: "10 seconds",
+            headers: { "X-Api-Key": apiKey },
+          }).pipe(
+            Effect.map((socket) => watchHopliteThreadChat({ socket, hopliteThreadId })),
+            Effect.provide(NodeSocket.layerWebSocketConstructor),
+          ),
+        ).pipe(
+          Stream.mapError(
+            (error) =>
+              new HopliteCloudError({
+                code: "unavailable",
+                message: `Hoplite's chat for this task could not be loaded: ${error.message}`,
+              }),
+          ),
+        ),
+      ),
+    );
+
   return HopliteCloud.of({
     status,
     connected,
@@ -673,6 +705,7 @@ const make = Effect.gen(function* () {
     preview,
     listQuestions,
     answerQuestion,
+    watchThreadChat,
   });
 });
 

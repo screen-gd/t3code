@@ -103,6 +103,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.hopliteCloudGetStatus]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudConnect]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudDisconnect]: "hoplite-cloud",
+  [WS_METHODS.hopliteCloudWatchTaskChat]: "hoplite-cloud",
   [WS_METHODS.pullRequestsList]: "pull-requests",
   [WS_METHODS.pullRequestsListStats]: "pull-requests",
   [WS_METHODS.pullRequestsFilterOptions]: "pull-requests",

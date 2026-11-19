@@ -379,9 +379,11 @@ import {
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
   HopliteCloudConnectInput,
+  CloudTaskChatEvent,
   HopliteCloudDisconnectInput,
   HopliteCloudError,
   HopliteCloudStatus,
+  HopliteCloudWatchTaskChatInput,
 } from "./hopliteCloud.ts";
 import {
   ProjectCloneActionInput,
@@ -560,6 +562,7 @@ export const WS_METHODS = {
   hopliteCloudGetStatus: "hopliteCloud.getStatus",
   hopliteCloudConnect: "hopliteCloud.connect",
   hopliteCloudDisconnect: "hopliteCloud.disconnect",
+  hopliteCloudWatchTaskChat: "hopliteCloud.watchTaskChat",
 
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
@@ -1015,6 +1018,13 @@ const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, 
   payload: HopliteCloudDisconnectInput,
   success: HopliteCloudStatus,
   error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudWatchTaskChatRpc = Rpc.make(WS_METHODS.hopliteCloudWatchTaskChat, {
+  payload: HopliteCloudWatchTaskChatInput,
+  success: CloudTaskChatEvent,
+  error: HopliteCloudRpcError,
+  stream: true,
 });
 
 const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
@@ -2080,6 +2090,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsHopliteCloudGetStatusRpc,
   WsHopliteCloudConnectRpc,
   WsHopliteCloudDisconnectRpc,
+  WsHopliteCloudWatchTaskChatRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsFilterOptionsRpc,
