@@ -10,6 +10,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import * as ServerConfig from "../config.ts";
+import { makeSecretLock } from "./secretFileAcl.ts";
 
 const secretStoreErrorContext = {
   resource: Schema.String,
@@ -168,6 +169,26 @@ export const make = Effect.gen(function* () {
     ),
   );
 
+  const lock = yield* makeSecretLock;
+  // Locking the directory covers new files; existing ones are locked too, keeping their contents.
+  yield* Effect.gen(function* () {
+    yield* lock(serverConfig.secretsDir, "directory");
+    const names = yield* fileSystem.readDirectory(serverConfig.secretsDir);
+    yield* Effect.forEach(
+      names.filter((name) => name.endsWith(".bin")),
+      (name) => lock(path.join(serverConfig.secretsDir, name), "file"),
+      { discard: true },
+    );
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SecretStoreSecureError({
+          resource: `secrets directory ${serverConfig.secretsDir}`,
+          cause,
+        }),
+    ),
+  );
+
   const resolveSecretPath = (name: string) => path.join(serverConfig.secretsDir, `${name}.bin`);
 
   const get: ServerSecretStore["Service"]["get"] = (name) =>
@@ -203,6 +224,7 @@ export const make = Effect.gen(function* () {
           yield* fileSystem.chmod(tempPath, 0o600);
           yield* fileSystem.rename(tempPath, secretPath);
           yield* fileSystem.chmod(secretPath, 0o600);
+          yield* lock(secretPath, "file");
         }).pipe(
           Effect.catch((cause) =>
             fileSystem.remove(tempPath).pipe(
@@ -247,6 +269,7 @@ export const make = Effect.gen(function* () {
           );
           yield* fileSystem.chmod(tempPath, 0o600);
           yield* fileSystem.link(tempPath, secretPath);
+          yield* lock(secretPath, "file");
         }).pipe(
           Effect.ensuring(fileSystem.remove(tempPath).pipe(Effect.ignore)),
           Effect.mapError(
