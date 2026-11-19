@@ -197,3 +197,10 @@ export const HopliteCloudWatchTaskChatInput = Schema.Struct({
   taskId: NodeId,
 });
 export type HopliteCloudWatchTaskChatInput = typeof HopliteCloudWatchTaskChatInput.Type;
+
+export const HopliteCloudSendTaskMessageInput = Schema.Struct({
+  threadId: ThreadId,
+  taskId: NodeId,
+  message: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+});
+export type HopliteCloudSendTaskMessageInput = typeof HopliteCloudSendTaskMessageInput.Type;

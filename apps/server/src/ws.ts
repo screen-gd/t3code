@@ -97,6 +97,7 @@ import {
   ThreadId,
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
+  type HopliteCloudWatchTaskChatInput,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -249,7 +250,8 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
 import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
-import { watchTaskChat } from "./hopliteCloud/HopliteTaskChat.ts";
+import { resolveHopliteTask, watchTaskChat } from "./hopliteCloud/HopliteTaskChat.ts";
+import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
 import * as SourceControlBuiltInDrivers from "./sourceControl/builtInDrivers.ts";
@@ -1446,6 +1448,11 @@ export const layerWsRpc = (
       const otlpEndpointCheck = yield* OtlpEndpointCheck.OtlpEndpointCheck;
       const hopliteCloud = yield* HopliteCloud.HopliteCloud;
       const taskThreads = yield* ThreadManagementService.ThreadManagementService;
+      const hopliteTaskWatch = yield* HopliteTaskWatch.HopliteTaskWatch;
+      const readDelegatedTask = ({ threadId, taskId }: HopliteCloudWatchTaskChatInput) =>
+        taskThreads
+          .getThreadRecords(threadId, ["subagents"], { subagentIds: [taskId] })
+          .pipe(Effect.map(({ subagents }) => subagents[0]));
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
       const sourceControlSignIn = yield* SourceControlSignIn.SourceControlSignIn;
@@ -2636,14 +2643,26 @@ export const layerWsRpc = (
           hopliteCloud.disconnect(input.provider ?? "hoplite"),
         [WS_METHODS.hopliteCloudWatchTaskChat]: (input) =>
           watchTaskChat(
-            {
-              readTask: ({ threadId, taskId }) =>
-                taskThreads
-                  .getThreadRecords(threadId, ["subagents"], { subagentIds: [taskId] })
-                  .pipe(Effect.map(({ subagents }) => subagents[0])),
-              watchThreadChat: hopliteCloud.watchThreadChat,
-            },
+            { readTask: readDelegatedTask, watchThreadChat: hopliteCloud.watchThreadChat },
             input,
+          ),
+        // Sent as the delegating thread, so its task card follows the new run like an agent's follow-up.
+        [WS_METHODS.hopliteCloudSendTaskMessage]: (input) =>
+          resolveHopliteTask(readDelegatedTask, input).pipe(
+            Effect.flatMap((hopliteThreadId) =>
+              hopliteTaskWatch.sendMessage(
+                { threadId: hopliteThreadId, message: input.message },
+                input.threadId,
+              ),
+            ),
+            Effect.asVoid,
+          ),
+        [WS_METHODS.hopliteCloudStopTask]: (input) =>
+          resolveHopliteTask(readDelegatedTask, input).pipe(
+            Effect.flatMap((hopliteThreadId) =>
+              hopliteTaskWatch.stopTask({ threadId: hopliteThreadId }),
+            ),
+            Effect.asVoid,
           ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
@@ -3393,6 +3412,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+    const hopliteTaskWatch = yield* HopliteTaskWatch.HopliteTaskWatch;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3469,6 +3489,7 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
               Layer.provide(OtlpEndpointCheck.layer),
               Layer.provide(HopliteCloud.layer),
+              Layer.provide(Layer.succeed(HopliteTaskWatch.HopliteTaskWatch, hopliteTaskWatch)),
               Layer.provide(
                 Layer.succeed(
                   PullRequestReviewGuideService.PullRequestReviewGuideService,

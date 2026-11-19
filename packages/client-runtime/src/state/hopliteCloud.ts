@@ -64,6 +64,14 @@ export function createHopliteCloudEnvironmentAtoms<R, E>(
       tag: WS_METHODS.hopliteCloudDisconnect,
       concurrency: settingsWrite,
     }),
+    sendTaskMessage: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:hoplite-cloud:send-task-message",
+      tag: WS_METHODS.hopliteCloudSendTaskMessage,
+    }),
+    stopTask: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:hoplite-cloud:stop-task",
+      tag: WS_METHODS.hopliteCloudStopTask,
+    }),
     taskChat: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:hoplite-cloud:task-chat",
       tag: WS_METHODS.hopliteCloudWatchTaskChat,

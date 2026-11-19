@@ -71,7 +71,6 @@ import * as ProviderInstanceRegistryHydration from "./provider/ProviderInstanceR
 import * as ProjectSettingsOverrideSweep from "./provider/ProjectSettingsOverrideSweep.ts";
 import * as TerminalManager from "./terminal/Manager.ts";
 import * as McpHttpServer from "./mcp/McpHttpServer.ts";
-import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
 import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
@@ -782,17 +781,13 @@ const layerMakeRoutes = Layer.mergeAll(
     DeviceHubProxy.layer,
     ServerBrowserStream.routeLayer,
     ServerHttp.layerStaticAndDevRoute,
-    Ws.layer,
+    // The same layer value below builds once, so clients and agents share one watcher.
+    Ws.layer.pipe(Layer.provide(HopliteTaskWatch.layerLive)),
   ),
   McpHttpServer.layer.pipe(
     Layer.provide(ProviderAdapterRegistry.layerFromProviderInstanceRegistry),
-    // Agents start Hoplite tasks with the key this server holds; Ws provides its own copy.
-    Layer.provide(
-      HopliteTaskWatch.layer.pipe(
-        Layer.provideMerge(HopliteCloud.layer),
-        Layer.provide(ProjectionStoreV2.layer),
-      ),
-    ),
+    // Agents start Hoplite tasks with the key this server holds.
+    Layer.provide(HopliteTaskWatch.layerLive),
     Layer.provide(McpOAuth.layerMcpClientAuthenticator),
   ),
   // Follows delegated tasks running in linked environments, including after a restart.

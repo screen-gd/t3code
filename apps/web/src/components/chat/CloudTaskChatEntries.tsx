@@ -5,7 +5,7 @@ import { cn } from "../../lib/utils";
 import { hopliteCloudEnvironment } from "../../state/hopliteCloud";
 import { useEnvironmentQuery } from "../../state/query";
 import ChatMarkdown from "../ChatMarkdown";
-import { CloudTaskChatLoading } from "./CloudTaskChatDialog";
+import { CloudTaskChatLoading } from "./CloudTaskChatPane";
 
 export default function CloudTaskChatEntries(props: {
   readonly environmentId: EnvironmentId;

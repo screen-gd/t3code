@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { CloudTaskChatDialog } from "./CloudTaskChatDialog";
+import { openCloudTaskChat } from "./CloudTaskChatPane";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { SectionHeaderStatus } from "../ui/collapsible-section-header";
@@ -258,7 +258,6 @@ function RemoteSubagentRow(props: {
   const navigate = useNavigate();
   const environment = useEnvironment(props.agent.remoteChild.environmentId);
   const { remoteChild } = props.agent;
-  const [chatOpen, setChatOpen] = useState(false);
   const showsChat = remoteChild.service === "hoplite";
   const status = props.agent.status;
   const failed = status === "failed";
@@ -268,16 +267,6 @@ function RemoteSubagentRow(props: {
   });
   return (
     <li className="group relative flex h-8 items-center rounded-lg">
-      {showsChat ? (
-        <CloudTaskChatDialog
-          open={chatOpen}
-          onOpenChange={setChatOpen}
-          environmentId={props.environmentId}
-          threadId={props.agent.threadId}
-          taskId={props.agent.id}
-          title={title}
-        />
-      ) : null}
       <Tooltip>
         <TooltipTrigger
           delay={200}
@@ -288,7 +277,13 @@ function RemoteSubagentRow(props: {
               part="row"
               aria-disabled={(!showsChat && environment === null) || undefined}
               onClick={() => {
-                if (showsChat) return setChatOpen(true);
+                if (showsChat) {
+                  return openCloudTaskChat(
+                    scopeThreadRef(props.environmentId, props.agent.threadId),
+                    props.agent.id,
+                    title,
+                  );
+                }
                 if (environment === null) return;
                 void navigate({
                   to: "/$environmentId/$threadId",

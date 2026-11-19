@@ -188,33 +188,39 @@ export const watchAcpThreadChat = (input: {
     ),
   );
 
-/** Resolves a delegated task to its Hoplite thread, so clients can only read tasks they can see here. */
+type ReadTask<E> = (
+  input: HopliteCloudWatchTaskChatInput,
+) => Effect.Effect<OrchestrationV2Subagent | undefined, E>;
+
+/** A delegated task's Hoplite thread, so clients only reach tasks of threads they can see here. */
+export const resolveHopliteTask = <E>(
+  readTask: ReadTask<E>,
+  input: HopliteCloudWatchTaskChatInput,
+): Effect.Effect<string, HopliteCloudError> =>
+  readTask(input).pipe(
+    Effect.orElseSucceed(() => undefined),
+    Effect.flatMap((task) =>
+      task?.remoteChild?.service === "hoplite"
+        ? Effect.succeed(task.remoteChild.threadId)
+        : Effect.fail(
+            new HopliteCloudError({
+              code: task === undefined ? "not_found" : "unsupported",
+              message:
+                task === undefined
+                  ? "This thread has no such task."
+                  : "Only tasks delegated to Hoplite open here.",
+            }),
+          ),
+    ),
+  );
+
 export const watchTaskChat = <E>(
   deps: {
-    readonly readTask: (
-      input: HopliteCloudWatchTaskChatInput,
-    ) => Effect.Effect<OrchestrationV2Subagent | undefined, E>;
+    readonly readTask: ReadTask<E>;
     readonly watchThreadChat: (
       hopliteThreadId: string,
     ) => Stream.Stream<CloudTaskChatEvent, HopliteCloudError>;
   },
   input: HopliteCloudWatchTaskChatInput,
 ): Stream.Stream<CloudTaskChatEvent, HopliteCloudError> =>
-  Stream.unwrap(
-    deps.readTask(input).pipe(
-      Effect.orElseSucceed(() => undefined),
-      Effect.map((task) =>
-        task?.remoteChild?.service === "hoplite"
-          ? deps.watchThreadChat(task.remoteChild.threadId)
-          : Stream.fail(
-              new HopliteCloudError({
-                code: task === undefined ? "not_found" : "unsupported",
-                message:
-                  task === undefined
-                    ? "This thread has no such task."
-                    : "Only tasks delegated to Hoplite show their chat here.",
-              }),
-            ),
-      ),
-    ),
-  );
+  Stream.unwrap(Effect.map(resolveHopliteTask(deps.readTask, input), deps.watchThreadChat));

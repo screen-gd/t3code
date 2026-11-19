@@ -139,6 +139,9 @@ export async function reopenClosedView(
     case "side-chat":
       panels.openSideChat(ref, surface.threadId);
       break;
+    case "cloud-task":
+      panels.openCloudTask(ref, surface.taskId, surface.title);
+      break;
     default:
       panels.open(ref, surface.kind);
   }

@@ -569,3 +569,9 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(HopliteTaskWatch, make);
+
+/** One watcher per server: MCP tools and the task's chat pane share its watches. */
+export const layerLive = layer.pipe(
+  Layer.provideMerge(HopliteCloud.layer),
+  Layer.provide(ProjectionStore.layer),
+);
