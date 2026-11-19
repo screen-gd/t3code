@@ -1,5 +1,5 @@
 import { pipe } from "effect/Function";
-import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ChevronsLeftRightEllipsisIcon, CloudIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -18,7 +18,6 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
-import { CloudSandboxLogoStack } from "../CloudSandboxLogos";
 import { HopliteCloudSetup } from "./HopliteCloudSetup";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -663,7 +662,7 @@ export function AddEnvironmentDialog({
                     mode: "hoplite",
                     title: "Cloud sandbox",
                     description: "Let agents send tasks to Hoplite, Devin or Jules.",
-                    icon: <CloudSandboxLogoStack />,
+                    icon: <CloudIcon aria-hidden className="size-4" />,
                   })}
             </div>
             <AnimatedHeight>

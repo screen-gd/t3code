@@ -49,7 +49,7 @@ import {
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
-import { cloudSandboxProviderInfo } from "../CloudSandboxLogos";
+import { CloudSandboxProviderMark, cloudSandboxProviderInfo } from "../CloudSandboxLogos";
 import {
   applyProviderInstanceSettings,
   brandProviderInstanceEntries,
@@ -731,6 +731,7 @@ function HandoffEndpoint(props: {
 }
 
 function CloudSandboxIcon({ service }: { service: CloudSandboxProvider }) {
-  const { icon: ServiceIcon } = cloudSandboxProviderInfo(service);
-  return <ServiceIcon className="size-3.5" />;
+  return (
+    <CloudSandboxProviderMark provider={cloudSandboxProviderInfo(service)} className="size-3.5" />
+  );
 }

@@ -10,8 +10,6 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { useState } from "react";
 
-import { cn } from "~/lib/utils";
-
 import { usePrimaryEnvironmentId } from "~/state/environments";
 import { hopliteCloudEnvironment } from "~/state/hopliteCloud";
 import { useEnvironmentQuery } from "~/state/query";
@@ -19,6 +17,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 import {
   Dialog,
   DialogDescription,
@@ -30,7 +29,8 @@ import {
 } from "../ui/dialog";
 import {
   CLOUD_SANDBOX_PROVIDERS,
-  CloudSandboxLogoStack,
+  CloudSandboxProviderMark,
+  CloudSandboxProviderMarks,
   cloudSandboxProviderInfo,
 } from "../CloudSandboxLogos";
 import { SettingsRow, SettingsSection } from "./settingsLayout";
@@ -112,7 +112,7 @@ export function HopliteCloudSetup() {
               <li key={entry.provider} className="space-y-1.5">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm text-foreground">
-                    <info.icon aria-hidden className="size-4" />
+                    <CloudSandboxProviderMark provider={info} />
                     {info.name} connected
                   </span>
                   <Button
@@ -149,10 +149,30 @@ export function HopliteCloudSetup() {
           }
         }}
       >
+        {offered.length > 1 ? (
+          <div>
+            <span className="mb-1.5 block text-xs font-medium text-foreground">Provider</span>
+            <ToggleGroup
+              aria-label="Provider"
+              variant="segmented"
+              value={[provider]}
+              onValueChange={(next) => {
+                const value = offered.find((entry) => entry.id === next[0]);
+                if (value) setProvider(value.id);
+              }}
+            >
+              {offered.map((entry) => (
+                <Toggle key={entry.id} value={entry.id} disabled={pending}>
+                  <CloudSandboxProviderMark provider={entry} className="size-3.5" />
+                  {entry.name}
+                </Toggle>
+              ))}
+            </ToggleGroup>
+          </div>
+        ) : null}
         <label className="block">
-          <span className="mb-1.5 flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-foreground">API key</span>
-            <CloudSandboxLogoStack providers={offered} />
+          <span className="mb-1.5 block text-xs font-medium text-foreground">
+            {selected.name} API key
           </span>
           <Input
             type="password"
@@ -164,26 +184,6 @@ export function HopliteCloudSetup() {
             disabled={pending}
           />
         </label>
-        <div role="radiogroup" aria-label="Provider" className="flex flex-wrap gap-1.5">
-          {offered.map((entry) => (
-            <button
-              key={entry.id}
-              type="button"
-              role="radio"
-              aria-checked={entry.id === provider}
-              onClick={() => setProvider(entry.id)}
-              className={cn(
-                "flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors",
-                entry.id === provider
-                  ? "border-primary/60 bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <CloudSandboxLogoStack providers={[entry]} />
-              {entry.name}
-            </button>
-          ))}
-        </div>
         <p className="text-xs text-muted-foreground">
           {selected.keyHelp} It's saved on this computer and never shown in the app again.
         </p>
@@ -230,7 +230,7 @@ export function HopliteCloudSection() {
       <SettingsRow
         title={
           <span className="flex items-center gap-2">
-            <CloudSandboxLogoStack providers={infos} />
+            <CloudSandboxProviderMarks providers={infos} />
             {infos.map((info) => info.name).join(", ")}
           </span>
         }

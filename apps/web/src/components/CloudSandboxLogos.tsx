@@ -40,8 +40,29 @@ export const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProviderInfo> = 
 export const cloudSandboxProviderInfo = (id: CloudSandboxProvider): CloudSandboxProviderInfo =>
   CLOUD_SANDBOX_PROVIDERS.find((provider) => provider.id === id) ?? CLOUD_SANDBOX_PROVIDERS[0]!;
 
-/** The providers' logos, overlapped in a small stack. */
-export function CloudSandboxLogoStack({
+/** A provider's mark at its natural shape; Hoplite's is an app tile, so it gets tile corners. */
+export function CloudSandboxProviderMark({
+  provider,
+  className,
+}: {
+  provider: CloudSandboxProviderInfo;
+  className?: string;
+}) {
+  const ProviderIcon = provider.icon;
+  return (
+    <ProviderIcon
+      aria-hidden
+      className={cn(
+        "size-4 shrink-0 opacity-100",
+        provider.id === "hoplite" && "overflow-hidden rounded-sm",
+        className,
+      )}
+    />
+  );
+}
+
+/** The providers' marks side by side. */
+export function CloudSandboxProviderMarks({
   providers = CLOUD_SANDBOX_PROVIDERS,
   className,
 }: {
@@ -51,15 +72,10 @@ export function CloudSandboxLogoStack({
   return (
     <span
       aria-label={providers.map((provider) => provider.name).join(", ")}
-      className={cn("flex items-center -space-x-1.5", className)}
+      className={cn("flex items-center gap-1", className)}
     >
-      {providers.map(({ id, icon: ProviderIcon }) => (
-        <span
-          key={id}
-          className="inline-flex size-5 items-center justify-center overflow-hidden rounded-full bg-white ring-2 ring-background"
-        >
-          <ProviderIcon aria-hidden className="size-3.5" />
-        </span>
+      {providers.map((provider) => (
+        <CloudSandboxProviderMark key={provider.id} provider={provider} />
       ))}
     </span>
   );
