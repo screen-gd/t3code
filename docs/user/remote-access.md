@@ -236,17 +236,19 @@ again on its next connect.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
-## Hoplite cloud tasks
+## Cloud sandbox tasks
 
-Open **Settings → Environments → Add environment**, choose **Hoplite**, and
-paste a [Hoplite](https://hoplite.sh) API key from **Settings → Workspace → API
-keys** there. The key stays on the machine running T3 Code; clients and agents
-never see it.
+T3 Code can hand tasks to cloud agents that run in their own sandboxes:
+[Hoplite](https://hoplite.sh), [Devin](https://devin.ai) and
+[Jules](https://jules.google). Open **Settings → Environments → Add
+environment**, choose **Cloud sandbox**, pick the provider, and paste its API
+key. Each key stays on the machine running T3 Code; clients and agents never
+see it.
 
-Agents can then hand a task to a Hoplite cloud thread, which runs in its own
-sandbox with that project's repository, and check its status and pull request
-later. Hoplite bills those threads to your Hoplite workspace. **Disconnect**
-removes the key.
+Agents can then start a task in a provider's sandbox with the repository it
+names, follow up on it, and get its pull request back in the chat. Each
+provider bills its tasks to your account there. Jules has no API to stop a
+session, so stop those in Jules. **Disconnect** removes a provider's key.
 
 ## Browser on a remote environment
 

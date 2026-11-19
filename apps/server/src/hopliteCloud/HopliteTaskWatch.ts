@@ -31,6 +31,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
+import { PROVIDER_NAMES, providerOfTask } from "./CloudSandboxProviders.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
 
 // Survives restarts with the key it belongs to; holds thread ids only.
@@ -102,10 +103,13 @@ const GIVE_UP_CODES: ReadonlyArray<HopliteCloudError["code"]> = [
   "invalid_key",
   "forbidden",
   "not_found",
+  "unsupported",
 ];
 
+const providerName = (taskId: string) => PROVIDER_NAMES[providerOfTask(taskId).provider];
+
 const describe = (task: HopliteCloudTask) =>
-  `Hoplite task ${task.threadId}${task.title === null ? "" : ` ("${task.title}")`}`;
+  `${providerName(task.threadId)} task ${task.threadId}${task.title === null ? "" : ` ("${task.title}")`}`;
 
 const formatQuestion = (question: HopliteCloudQuestion) =>
   [
@@ -130,8 +134,8 @@ function settledWake(
       ? ([
           `is waiting for an answer. ${
             questions.length === 0
-              ? "Reply with hoplite_task and its threadId."
-              : "Answer with hoplite_task, its threadId and the questionId."
+              ? "Reply with cloud_task and its threadId."
+              : "Answer with cloud_task, its threadId and the questionId."
           } If this thread cannot decide, ask the user.`,
           "updated",
         ] as const)
@@ -150,7 +154,7 @@ function settledWake(
     notification: {
       source: { kind: "monitor" },
       outcome,
-      summary: `${task.title ?? "Hoplite task"} ${what.split(".")[0]}`,
+      summary: `${task.title ?? `${providerName(task.threadId)} task`} ${what.split(".")[0]}`,
     },
   };
 }
@@ -161,8 +165,15 @@ type CardStatus = "completed" | "failed" | "cancelled";
 const cardStatus = (status: HopliteCloud.HopliteRunStatus): CardStatus =>
   status === "failed" ? "failed" : status === "cancelled" ? "cancelled" : "completed";
 
-const HOPLITE_ENVIRONMENT = EnvironmentId.make("hoplite");
-const HOPLITE_MODEL = { instanceId: ProviderInstanceId.make("hoplite"), model: "hoplite" };
+// Each provider stands in for the environment and model a linked task would name.
+const serviceIdentity = (taskId: string) => {
+  const { provider } = providerOfTask(taskId);
+  return {
+    service: provider,
+    environmentId: EnvironmentId.make(provider),
+    modelSelection: { instanceId: ProviderInstanceId.make(provider), model: provider },
+  };
+};
 
 export class HopliteTaskWatch extends Context.Service<
   HopliteTaskWatch,
@@ -244,6 +255,7 @@ const make = Effect.gen(function* () {
       readonly key: string;
     }) {
       const parentThreadId = ThreadId.make(input.callerThreadId);
+      const identity = serviceIdentity(input.hopliteThreadId);
       const { runs } = yield* engine.getThreadRecords(parentThreadId, ["runs"]);
       const parentRun = runs
         .filter(ThreadManagement.isActiveRun)
@@ -258,12 +270,12 @@ const make = Effect.gen(function* () {
         task: input.prompt,
         ...(input.title === undefined ? {} : { title: input.title }),
         driver: ProviderDriverKind.make("remote"),
-        modelSelection: HOPLITE_MODEL,
+        modelSelection: identity.modelSelection,
         remoteChild: {
-          environmentId: HOPLITE_ENVIRONMENT,
+          environmentId: identity.environmentId,
           threadId: ThreadId.make(input.hopliteThreadId),
-          label: "Hoplite",
-          service: "hoplite",
+          label: PROVIDER_NAMES[identity.service],
+          service: identity.service,
           ...(input.runId === null ? {} : { runId: RunId.make(input.runId) }),
         },
         completionWake: "always",
@@ -463,11 +475,11 @@ const make = Effect.gen(function* () {
         watch,
         `unread:${watch.runId ?? watch.afterRunId ?? "none"}`,
         {
-          text: `T3 Code stopped following Hoplite task ${watch.hopliteThreadId}: ${read.failure.message}`,
+          text: `T3 Code stopped following ${providerName(watch.hopliteThreadId)} task ${watch.hopliteThreadId}: ${read.failure.message}`,
           notification: {
             source: { kind: "monitor" },
             outcome: "failed",
-            summary: "Stopped following a Hoplite task",
+            summary: `Stopped following a ${providerName(watch.hopliteThreadId)} task`,
           },
         },
         "failed",
@@ -514,7 +526,7 @@ const make = Effect.gen(function* () {
     const { subagents } = yield* engine.getThreadRecords(parentThreadId, ["subagents"]);
     const task = subagents.find((candidate) => candidate.id === taskId);
     const remote = task?.remoteChild;
-    if (task?.result == null || remote?.service !== "hoplite") return;
+    if (task?.result == null || remote?.service === undefined) return;
     yield* Ref.update(watches, (current) =>
       current.filter((entry) => entry.taskId !== taskId),
     ).pipe(Effect.andThen(persist));

@@ -182,11 +182,11 @@ it.effect("a rejected key is never saved and its text stays out of the error", (
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
-    const error = yield* Effect.flip(hoplite.connect(REVOKED_KEY));
+    const error = yield* Effect.flip(hoplite.connect("hoplite", REVOKED_KEY));
     assert.equal(error.code, "invalid_key");
     assert.notInclude(error.message, REVOKED_KEY);
     assert.isFalse(harness.stored.has(HopliteCloud.HOPLITE_API_KEY_SECRET));
-    assert.deepStrictEqual(yield* hoplite.status, { connected: false, problem: null });
+    assert.deepInclude(yield* hoplite.status, { connected: false, problem: null });
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -194,8 +194,8 @@ it.effect("connecting checks the key, and a task starts in the repo's project", 
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
-    const connected = yield* hoplite.connect(GOOD_KEY);
-    assert.deepStrictEqual(connected, { connected: true, problem: null });
+    const connected = yield* hoplite.connect("hoplite", GOOD_KEY);
+    assert.deepInclude(connected, { connected: true, problem: null });
 
     assert.equal(yield* errorCode(hoplite.startTask({ prompt: "Fix login" })), "project_required");
 
@@ -219,7 +219,7 @@ it.effect("a task naming a repo uses the project that has it, or creates one", (
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
-    yield* hoplite.connect(GOOD_KEY);
+    yield* hoplite.connect("hoplite", GOOD_KEY);
     const threadBodies = () =>
       harness.sent
         .filter((request) => request.method === "POST" && request.path === "/api/threads")
@@ -249,7 +249,7 @@ it.effect("a task reads its active run, latest reply and pull request", () => {
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
     assert.equal(yield* errorCode(hoplite.getTask({ threadId: "thr_1" })), "not_connected");
-    yield* hoplite.connect(GOOD_KEY);
+    yield* hoplite.connect("hoplite", GOOD_KEY);
     // Not run_0, the finished run Hoplite reports when asked without a run id.
     assert.deepStrictEqual((yield* hoplite.readTask({ threadId: "thr_1" })).run, {
       id: "run_1",
@@ -275,7 +275,7 @@ it.effect("a saved key that stops working stays connected and says why", () => {
     const status = yield* hoplite.status;
     assert.isTrue(status.connected);
     assert.match(status.problem ?? "", /rejected the API key/);
-    yield* hoplite.disconnect;
+    yield* hoplite.disconnect("hoplite");
     assert.isFalse(harness.stored.has(HopliteCloud.HOPLITE_API_KEY_SECRET));
   }).pipe(Effect.provide(harness.layer));
 });
@@ -284,7 +284,7 @@ it.effect("a task takes follow-ups, stops its active run, and reports its previe
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
-    yield* hoplite.connect(GOOD_KEY);
+    yield* hoplite.connect("hoplite", GOOD_KEY);
     const sent = yield* hoplite.sendMessage({
       threadId: "thr_1",
       message: "Also fix signup",
@@ -317,7 +317,7 @@ it.effect("a task reports its questions and takes an answer", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
-    yield* hoplite.connect(GOOD_KEY);
+    yield* hoplite.connect("hoplite", GOOD_KEY);
     const questions = yield* hoplite.listQuestions({ threadId: "thr_1" });
     assert.deepStrictEqual(questions, [
       {
@@ -351,7 +351,7 @@ it.effect("a model named the way a person says it runs as Hoplite's id for it", 
   const harness = makeHarness();
   return Effect.gen(function* () {
     const hoplite = yield* HopliteCloud.HopliteCloud;
-    yield* hoplite.connect(GOOD_KEY);
+    yield* hoplite.connect("hoplite", GOOD_KEY);
     yield* hoplite.startTask({ prompt: "Fix login", repo: "acme/api", model: "GPT 6 Luna" });
     const create = harness.sent.find(
       (request) => request.method === "POST" && request.path === "/api/threads",

@@ -1,5 +1,6 @@
 import { OrchestrationMessageContext } from "./composerContext.ts";
 import { withRecordIdTable } from "./orchestrationV2IdTable.ts";
+import { CloudSandboxProvider } from "./hopliteCloud.ts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -882,7 +883,7 @@ export const OrchestrationV2RemoteTaskChild = Schema.Struct({
    * Runs in a cloud service instead of a linked environment: `environmentId`,
    * `threadId` and `runId` then name it there, and no T3 thread opens for it.
    */
-  service: Schema.optional(Schema.Literal("hoplite")),
+  service: Schema.optional(CloudSandboxProvider),
 });
 export type OrchestrationV2RemoteTaskChild = typeof OrchestrationV2RemoteTaskChild.Type;
 

@@ -377,7 +377,12 @@ import {
   ScheduledTaskMutationResult,
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
-import { HopliteCloudConnectInput, HopliteCloudError, HopliteCloudStatus } from "./hopliteCloud.ts";
+import {
+  HopliteCloudConnectInput,
+  HopliteCloudDisconnectInput,
+  HopliteCloudError,
+  HopliteCloudStatus,
+} from "./hopliteCloud.ts";
 import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
@@ -1007,7 +1012,7 @@ const WsHopliteCloudConnectRpc = Rpc.make(WS_METHODS.hopliteCloudConnect, {
 });
 
 const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, {
-  payload: Schema.Struct({}),
+  payload: HopliteCloudDisconnectInput,
   success: HopliteCloudStatus,
   error: HopliteCloudRpcError,
 });

@@ -68,7 +68,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.peerLinksUnlink]: AuthAccessWriteScope,
   // A link lets every agent here reach the other environment: Settings' bar.
   [WS_METHODS.peerLinksAnswerRequest]: AuthAccessWriteScope,
-  // The Hoplite key is the controller's: only settings writers may replace it.
+  // Cloud sandbox keys are the controller's: only settings writers may replace them.
   [WS_METHODS.hopliteCloudConnect]: AuthSettingsWriteScope,
   [WS_METHODS.hopliteCloudDisconnect]: AuthSettingsWriteScope,
 } as const;

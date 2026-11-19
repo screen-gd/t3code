@@ -3,24 +3,46 @@ import * as Schema from "effect/Schema";
 import { TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * Hoplite (hoplite.sh) runs coding agents in cloud sandboxes. The environment
- * holding the Hoplite API key starts and reads threads there; clients and
- * agents only ever see project and thread records, never the key.
+ * Cloud sandbox providers run coding agents in their own sandboxes through an API:
+ * Hoplite (hoplite.sh), Devin (devin.ai) and Jules (jules.google). The environment
+ * holding a provider's API key starts and reads tasks there; clients and agents only
+ * ever see task records, never a key.
  */
+export const CloudSandboxProvider = Schema.Literals(["hoplite", "devin", "jules"]);
+export type CloudSandboxProvider = typeof CloudSandboxProvider.Type;
+
 const HopliteId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
 const HopliteModel = Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128)));
 
-export const HopliteCloudStatus = Schema.Struct({
+export const CloudSandboxProviderStatus = Schema.Struct({
+  provider: CloudSandboxProvider,
   connected: Schema.Boolean,
-  /** Why the stored key could not list projects, such as a revoked key. */
+  /** Why the stored key stopped working, such as a revoked key. */
   problem: Schema.NullOr(Schema.String),
+});
+export type CloudSandboxProviderStatus = typeof CloudSandboxProviderStatus.Type;
+
+export const HopliteCloudStatus = Schema.Struct({
+  /** Hoplite's key, as before providers were added. */
+  connected: Schema.Boolean,
+  problem: Schema.NullOr(Schema.String),
+  /** Every provider, connected or not; older servers omit it. */
+  providers: Schema.optional(Schema.Array(CloudSandboxProviderStatus)),
 });
 export type HopliteCloudStatus = typeof HopliteCloudStatus.Type;
 
 export const HopliteCloudConnectInput = Schema.Struct({
+  /** Omitted means Hoplite. */
+  provider: Schema.optional(CloudSandboxProvider),
   apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
 });
 export type HopliteCloudConnectInput = typeof HopliteCloudConnectInput.Type;
+
+export const HopliteCloudDisconnectInput = Schema.Struct({
+  /** Omitted means Hoplite. */
+  provider: Schema.optional(CloudSandboxProvider),
+});
+export type HopliteCloudDisconnectInput = typeof HopliteCloudDisconnectInput.Type;
 
 export const HopliteCloudThreadStatus = Schema.Literals([
   "queued",
@@ -53,10 +75,12 @@ export type HopliteCloudTaskResult = typeof HopliteCloudTaskResult.Type;
 
 export const HopliteCloudStartTaskInput = Schema.Struct({
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
+  /** Omitted uses Hoplite when it is connected, else the first connected provider. */
+  provider: Schema.optional(CloudSandboxProvider),
   title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
-  /** A GitHub `owner/name`; picks the Hoplite project with it, creating one when none has it. */
+  /** A GitHub `owner/name`; the Hoplite project or Jules source with it; Devin gets it in the prompt. */
   repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
-  /** A Hoplite model id or name, such as `gpt-6-luna` or "GPT 6 Luna"; omitted uses Hoplite's default. */
+  /** Hoplite only: a model id or name, such as `gpt-6-luna` or "GPT 6 Luna"; omitted uses Hoplite's default. */
   model: HopliteModel,
   /** Makes retries create one thread. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
@@ -130,6 +154,8 @@ export const HopliteCloudErrorCode = Schema.Literals([
   "model_unavailable",
   "rate_limited",
   "unavailable",
+  /** The provider's API has no way to do this, such as stopping a Jules session. */
+  "unsupported",
 ]);
 export type HopliteCloudErrorCode = typeof HopliteCloudErrorCode.Type;
 

@@ -2628,8 +2628,10 @@ export const layerWsRpc = (
             ),
           ),
         [WS_METHODS.hopliteCloudGetStatus]: (_input) => hopliteCloud.status,
-        [WS_METHODS.hopliteCloudConnect]: (input) => hopliteCloud.connect(input.apiKey),
-        [WS_METHODS.hopliteCloudDisconnect]: (_input) => hopliteCloud.disconnect,
+        [WS_METHODS.hopliteCloudConnect]: (input) =>
+          hopliteCloud.connect(input.provider ?? "hoplite", input.apiKey),
+        [WS_METHODS.hopliteCloudDisconnect]: (input) =>
+          hopliteCloud.disconnect(input.provider ?? "hoplite"),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

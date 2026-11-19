@@ -93,6 +93,24 @@ export function ProviderIcon(props: ProviderIconProps) {
       />
     );
   }
+  if (props.provider === "devin") {
+    return (
+      <Image
+        source={require("../../assets/devin.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+      />
+    );
+  }
+  if (props.provider === "jules") {
+    return (
+      <Image
+        source={require("../../assets/jules.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+      />
+    );
+  }
   if (props.provider === "acpRegistry") {
     return <AcpRegistryProviderIcon color={mono} iconUrl={props.iconUrl} size={size} />;
   }

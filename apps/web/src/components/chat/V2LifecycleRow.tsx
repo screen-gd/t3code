@@ -27,6 +27,7 @@ import {
   type OrchestrationV2ModelSwitch,
   type OrchestrationV2Notification,
   type OrchestrationV2TurnItem,
+  type CloudSandboxProvider,
   type OrchestrationV2RemoteTaskChild,
   type OrchestrationV2Subagent,
   type ProviderInstanceId,
@@ -48,7 +49,7 @@ import {
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
-import { HopliteIcon } from "../Icons";
+import { cloudSandboxProviderInfo } from "../CloudSandboxLogos";
 import {
   applyProviderInstanceSettings,
   brandProviderInstanceEntries,
@@ -218,7 +219,7 @@ function SubagentAvatar({
   iconUrl,
   accentColor,
   showBadge,
-  hoplite,
+  service,
   status,
   className,
 }: {
@@ -227,7 +228,7 @@ function SubagentAvatar({
   iconUrl?: string | undefined;
   accentColor?: string | undefined;
   showBadge: boolean;
-  hoplite?: boolean;
+  service?: CloudSandboxProvider | undefined;
   status?: OrchestrationV2TurnItem["status"] | undefined;
   className?: string;
 }) {
@@ -239,8 +240,8 @@ function SubagentAvatar({
         className,
       )}
     >
-      {hoplite ? (
-        <HopliteIcon className="size-3.5" />
+      {service ? (
+        <CloudSandboxIcon service={service} />
       ) : driver ? (
         <ProviderInstanceIcon
           driverKind={driver}
@@ -323,7 +324,7 @@ export function EnvironmentSubagentAvatar({
       iconUrl={iconUrl}
       accentColor={accentColor}
       showBadge={showBadge}
-      hoplite={remote?.service === "hoplite"}
+      service={remote?.service}
     />
   );
 }
@@ -727,4 +728,9 @@ function HandoffEndpoint(props: {
       </TooltipPopup>
     </Tooltip>
   );
+}
+
+function CloudSandboxIcon({ service }: { service: CloudSandboxProvider }) {
+  const { icon: ServiceIcon } = cloudSandboxProviderInfo(service);
+  return <ServiceIcon className="size-3.5" />;
 }

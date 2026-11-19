@@ -27,14 +27,14 @@ const callerThreadId = Effect.map(
 );
 
 const handlers = {
-  // These spend the controller's Hoplite key, so read-only clients and linked environments may not.
-  hoplite_task: McpToolAccess.writesWithCapability(
-    ({ threadId, questionId, prompt, model, title, repo, clientRequestId }) =>
+  // These spend the controller's provider keys, so read-only clients and linked environments may not.
+  cloud_task: McpToolAccess.writesWithCapability(
+    ({ threadId, questionId, prompt, provider, model, title, repo, clientRequestId }) =>
       questionId !== undefined && threadId === undefined
         ? Effect.fail(
             new OrchestratorMcpFailure({
               code: "target_required",
-              message: "Pass the threadId of the Hoplite task that asked the question.",
+              message: "Pass the threadId of the cloud task that asked the question.",
             }),
           )
         : Effect.all([HopliteTaskWatch.HopliteTaskWatch, callerThreadId]).pipe(
@@ -43,6 +43,7 @@ const handlers = {
                 ? watch.startTask(
                     {
                       prompt,
+                      ...(provider === undefined ? {} : { provider }),
                       ...(model === undefined ? {} : { model }),
                       ...(title === undefined ? {} : { title }),
                       ...(repo === undefined ? {} : { repo }),
@@ -73,7 +74,7 @@ const handlers = {
             Effect.mapError(toFailure),
           ),
   ),
-  hoplite_preview: McpToolAccess.writesWithCapability((input) =>
+  cloud_preview: McpToolAccess.writesWithCapability((input) =>
     HopliteCloud.HopliteCloud.pipe(
       Effect.flatMap((hoplite) => hoplite.preview(input)),
       Effect.mapError(toFailure),

@@ -18,7 +18,7 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
-import { HopliteIcon } from "../Icons";
+import { CloudSandboxLogoStack } from "../CloudSandboxLogos";
 import { HopliteCloudSetup } from "./HopliteCloudSetup";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
@@ -661,9 +661,9 @@ export function AddEnvironmentDialog({
                 ? null
                 : renderConnectionModeCard({
                     mode: "hoplite",
-                    title: "Hoplite",
-                    description: "Let agents send tasks to Hoplite's cloud.",
-                    icon: <HopliteIcon aria-hidden className="size-4" />,
+                    title: "Cloud sandbox",
+                    description: "Let agents send tasks to Hoplite, Devin or Jules.",
+                    icon: <CloudSandboxLogoStack />,
                   })}
             </div>
             <AnimatedHeight>
