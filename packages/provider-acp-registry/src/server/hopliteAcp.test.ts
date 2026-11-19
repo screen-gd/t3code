@@ -2,13 +2,31 @@ import { describe, expect, it } from "@effect/vitest";
 import { acpToolCallDiffPatch, acpToolCallSnippetEdit } from "@t3tools/provider-acp/server/adapter";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
+import { AcpRegistrySettings } from "../settings.ts";
 import {
+  acpRegistryRuntimeKey,
   isHopliteSignInRequired,
   normalizeHopliteToolCall,
   parseHopliteSignInPrompt,
   rollbackHopliteSession,
 } from "./hopliteAcp.ts";
+
+const decodeSettings = Schema.decodeSync(AcpRegistrySettings);
+
+describe("acpRegistryRuntimeKey", () => {
+  it("shares one key across Hoplite instances so a sign-in blocks every Hoplite probe", () => {
+    const hoplite = decodeSettings({
+      source: "local",
+      commandPath: "hoplite",
+      commandArgs: ["acp"],
+    });
+    const custom = decodeSettings({ source: "local", commandPath: "my-agent" });
+    expect(acpRegistryRuntimeKey(hoplite, "a")).toBe(acpRegistryRuntimeKey(hoplite, "b"));
+    expect(acpRegistryRuntimeKey(custom, "a")).not.toBe(acpRegistryRuntimeKey(custom, "b"));
+  });
+});
 
 const tool = (content: ReadonlyArray<unknown>, meta?: unknown) => ({
   toolCallId: "call_1",

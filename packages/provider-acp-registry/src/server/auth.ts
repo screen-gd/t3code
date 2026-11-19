@@ -21,7 +21,11 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import * as PtyAdapter from "@t3tools/shared/PtyAdapter";
 import * as ProviderAuthFlow from "@t3tools/provider-core/server/providerAuthFlow";
 import { normalizeAcpRegistryAuthMethods, normalizeAcpRegistryWebUrl } from "./probe.ts";
-import { isHopliteAcpCommand, parseHopliteSignInPrompt } from "./hopliteAcp.ts";
+import {
+  acpRegistryRuntimeKey,
+  isHopliteAcpCommand,
+  parseHopliteSignInPrompt,
+} from "./hopliteAcp.ts";
 import * as AcpRegistrySupport from "./AcpRegistrySupport.ts";
 import * as AcpRegistryRuntimeCoordinator from "./AcpRegistryRuntimeCoordinator.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
@@ -73,8 +77,7 @@ export const makeAcpRegistryAuth = Effect.fn("makeAcpRegistryAuth")(function* (o
   const coordinator = yield* Effect.serviceOption(
     AcpRegistryRuntimeCoordinator.AcpRegistryRuntimeCoordinator,
   );
-  const agentKey =
-    options.settings.source === "local" ? `local:${options.instanceId}` : options.settings.agentId;
+  const agentKey = acpRegistryRuntimeKey(options.settings, options.instanceId);
   const failure = (operation: string, detail: string, cause?: unknown) =>
     new ProviderSetupError({
       instanceId: options.instanceId,

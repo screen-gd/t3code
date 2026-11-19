@@ -16,6 +16,16 @@ export function isHopliteAcpCommand(settings: AcpRegistrySettings): boolean {
   return isHopliteAcpConfig(settings);
 }
 
+/**
+ * Coordinator key that keeps background probes away from a foreground sign-in. Every Hoplite
+ * instance shares one key: they run the same CLI against one per-user sign-in, and a signed-out
+ * probe of another instance starts (then kills) a competing sign-in.
+ */
+export function acpRegistryRuntimeKey(settings: AcpRegistrySettings, instanceId: string): string {
+  if (isHopliteAcpCommand(settings)) return "hoplite";
+  return settings.source === "local" ? `local:${instanceId}` : settings.agentId;
+}
+
 const HOPLITE_SIGN_IN_REQUIRED =
   /not signed in to Hoplite|signing in to Hoplite|rejected the stored CLI key/i;
 

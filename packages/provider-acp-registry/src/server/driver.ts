@@ -11,7 +11,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { AcpRegistrySettings } from "../settings.ts";
-import { isHopliteAcpCommand } from "./hopliteAcp.ts";
+import { acpRegistryRuntimeKey, isHopliteAcpCommand } from "./hopliteAcp.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import * as Clock from "effect/Clock";
@@ -849,9 +849,7 @@ export const AcpRegistryDriver: ProviderDriver<AcpRegistrySettings, AcpRegistryD
         const publishEnrichment = (
           Option.isSome(runtimeCoordinator)
             ? runtimeCoordinator.value.runBackgroundProbe(
-                effectiveConfig.source === "local"
-                  ? `local:${instanceId}`
-                  : effectiveConfig.agentId,
+                acpRegistryRuntimeKey(effectiveConfig, instanceId),
                 enrichProviderCached(snapshot),
               )
             : enrichProviderCached(snapshot).pipe(Effect.asSome)
