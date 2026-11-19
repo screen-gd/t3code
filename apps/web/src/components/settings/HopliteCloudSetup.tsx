@@ -179,7 +179,7 @@ export function HopliteCloudSetup() {
                   : "border-border text-muted-foreground hover:text-foreground",
               )}
             >
-              <entry.icon aria-hidden className="size-3.5" />
+              <CloudSandboxLogoStack providers={[entry]} />
               {entry.name}
             </button>
           ))}
