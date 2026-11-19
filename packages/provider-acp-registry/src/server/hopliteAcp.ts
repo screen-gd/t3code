@@ -1,4 +1,4 @@
-import { isHopliteAcpCommandPath, ProviderDriverKind } from "@t3tools/contracts";
+import { isHopliteAcpConfig, ProviderDriverKind } from "@t3tools/contracts";
 import {
   AcpProviderCapabilitiesV2,
   type AcpAdapterV2ExtensionContext,
@@ -13,7 +13,7 @@ import type { AcpRegistrySettings } from "../settings.ts";
 
 /** `hoplite acp` relays to Hoplite's cloud sandbox; https://hoplite.sh/docs/cli/acp */
 export function isHopliteAcpCommand(settings: AcpRegistrySettings): boolean {
-  return settings.source === "local" && isHopliteAcpCommandPath(settings.commandPath);
+  return isHopliteAcpConfig(settings);
 }
 
 const HOPLITE_SIGN_IN_REQUIRED =

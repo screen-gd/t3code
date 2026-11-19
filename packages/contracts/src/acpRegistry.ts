@@ -363,10 +363,20 @@ export function isHopliteAcpCommandPath(commandPath: string): boolean {
   return /^hoplite(\.exe|\.cmd)?$/i.test(commandPath.trim().split(/[\\/]/).pop() ?? "");
 }
 
-/** A provider instance's stored config targets the Hoplite CLI as a local ACP command. */
+/**
+ * A provider instance's stored config targets the Hoplite CLI as a local ACP command.
+ * New instances carry the reserved agent id as a marker so a renamed binary or
+ * wrapper path stays Hoplite; older ones are recognised by the executable name.
+ */
 export function isHopliteAcpConfig(config: unknown): boolean {
   if (typeof config !== "object" || config === null) return false;
   if (!("source" in config) || config.source !== "local") return false;
-  if (!("commandPath" in config) || typeof config.commandPath !== "string") return false;
-  return isHopliteAcpCommandPath(config.commandPath);
+  if ("agentId" in config && typeof config.agentId === "string") {
+    if (config.agentId.trim() === HOPLITE_ACP_AGENT_ID) return true;
+  }
+  return (
+    "commandPath" in config &&
+    typeof config.commandPath === "string" &&
+    isHopliteAcpCommandPath(config.commandPath)
+  );
 }

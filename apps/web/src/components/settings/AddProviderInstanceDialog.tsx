@@ -824,7 +824,6 @@ export function AddProviderInstanceDialog({
                     value={configDraft}
                     onChange={setConfigDraft}
                     idPrefix="add-provider-hoplite"
-                    environmentLabel={environmentLabel}
                     disabled={
                       driverLocks !== undefined &&
                       (driverLocks.configKeys.has("commandPath") ||

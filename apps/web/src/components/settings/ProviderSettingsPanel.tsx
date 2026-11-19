@@ -1371,7 +1371,6 @@ function ProviderInstanceRow({
   return (
     <ProviderInstanceCard
       environmentId={environmentId}
-      environmentLabel={environmentLabel}
       secretSources={secretSources}
       acpProjects={acpProjects}
       projectOverride={projectOverride}

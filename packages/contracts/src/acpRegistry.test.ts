@@ -70,8 +70,22 @@ describe("isHopliteAcpConfig", () => {
     ).toBe(true);
   });
 
+  it("matches a local config carrying the Hoplite agent marker", () => {
+    expect(
+      isHopliteAcpConfig({
+        source: "local",
+        agentId: "hoplite",
+        commandPath: "/opt/bin/my-wrapper",
+      }),
+    ).toBe(true);
+    expect(isHopliteAcpConfig({ source: "local", agentId: " hoplite ", commandPath: "dsh" })).toBe(
+      true,
+    );
+  });
+
   it("rejects registry configs, other executables, and non-objects", () => {
     expect(isHopliteAcpConfig({ source: "registry", commandPath: "hoplite" })).toBe(false);
+    expect(isHopliteAcpConfig({ source: "registry", agentId: "hoplite" })).toBe(false);
     expect(isHopliteAcpConfig({ source: "local", commandPath: "dsh" })).toBe(false);
     expect(isHopliteAcpConfig({ source: "local", commandPath: 42 })).toBe(false);
     expect(isHopliteAcpConfig({ source: "local" })).toBe(false);

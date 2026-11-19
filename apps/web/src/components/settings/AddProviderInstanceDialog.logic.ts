@@ -1,5 +1,5 @@
 import { msg } from "gt-react";
-import { HOPLITE_ACP_LABEL } from "@t3tools/contracts";
+import { HOPLITE_ACP_AGENT_ID, HOPLITE_ACP_LABEL } from "@t3tools/contracts";
 
 export type WizardNavigation =
   | { readonly kind: "navigate"; readonly step: number }
@@ -41,6 +41,7 @@ export const HOPLITE_PROVIDER_CHOICE = "acpRegistry:hoplite";
 /** Hoplite's CLI is an ACP agent; https://hoplite.sh/docs/cli/acp */
 export const HOPLITE_LOCAL_ACP_CONFIG = {
   source: "local",
+  agentId: HOPLITE_ACP_AGENT_ID,
   commandPath: "hoplite",
   commandArgs: ["acp"],
 } as const;

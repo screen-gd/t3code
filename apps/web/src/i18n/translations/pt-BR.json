@@ -8940,7 +8940,6 @@
   "65835a837c643c09": "Redefinir para a configuração do dispositivo",
   "aea940c95ef946b1": "Ativar {provider}",
   "74abd6f7968e9fe0": "Excluir a instância {instanceId}",
-  "009e2ca841fdc1ef": "este ambiente",
   "eee76b40711fd902": "Driver",
   "21d0ef064eefa159": "Status",
   "f31ce60f3f118c0d": "Nome de exibição",
@@ -12107,14 +12106,6 @@
   "faa3bb26abb39c93": "O guia de revisão falhou",
   "b7df38b7d8792d78": "Abrir guia",
   "9e91e9a77b664e4e": "Não foi possível iniciar um guia de revisão",
-  "40a21a2d19f71308": "CLI do Hoplite",
-  "e4fcf63fbf53b2a4": [
-    "Nome ou caminho do executável em ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "."
-  ]
+  "f7f0bd6e434b5a97": "Caminho do binário",
+  "12735c0acd486514": "Caminho do binário do Hoplite usado por esta instância."
 }

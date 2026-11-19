@@ -1,4 +1,5 @@
-import { T, Var } from "gt-react";
+import { HOPLITE_ACP_AGENT_ID } from "@t3tools/contracts";
+import { T } from "gt-react";
 
 import { hopliteProjectId, withHopliteProjectId } from "./AddProviderInstanceDialog.logic";
 import { DraftInput } from "../ui/draft-input";
@@ -8,7 +9,6 @@ interface HopliteSettingsRowsProps {
   readonly value: Readonly<Record<string, unknown>>;
   readonly onChange: (next: Record<string, unknown>) => void;
   readonly idPrefix: string;
-  readonly environmentLabel: string;
   readonly disabled?: boolean | undefined;
 }
 
@@ -21,7 +21,6 @@ export function HopliteSettingsRows({
   value,
   onChange,
   idPrefix,
-  environmentLabel,
   disabled = false,
 }: HopliteSettingsRowsProps) {
   const commandArgs = Array.isArray(value.commandArgs)
@@ -53,6 +52,7 @@ export function HopliteSettingsRows({
             onCommit={(projectId) =>
               onChange({
                 ...value,
+                agentId: HOPLITE_ACP_AGENT_ID,
                 commandArgs: withHopliteProjectId(commandArgs, projectId),
               })
             }
@@ -64,14 +64,12 @@ export function HopliteSettingsRows({
       <SettingsRow
         title={
           <label htmlFor={`${idPrefix}-cli`}>
-            <T>Hoplite CLI</T>
+            <T>Binary path</T>
           </label>
         }
         description={
           <span id={`${idPrefix}-cli-description`}>
-            <T>
-              Executable name or path on <Var>{environmentLabel}</Var>.
-            </T>
+            <T>Path to the Hoplite binary used by this instance.</T>
           </span>
         }
         control={
@@ -84,7 +82,11 @@ export function HopliteSettingsRows({
             placeholder="hoplite"
             onCommit={(next) => {
               const trimmed = next.trim();
-              onChange({ ...value, commandPath: trimmed.length > 0 ? trimmed : "hoplite" });
+              onChange({
+                ...value,
+                agentId: HOPLITE_ACP_AGENT_ID,
+                commandPath: trimmed.length > 0 ? trimmed : "hoplite",
+              });
             }}
             disabled={disabled}
             spellCheck={false}

@@ -8941,7 +8941,6 @@
   "65835a837c643c09": "Revenir au paramètre de l’appareil",
   "aea940c95ef946b1": "Activer {provider}",
   "74abd6f7968e9fe0": "Supprimer l’instance {instanceId}",
-  "009e2ca841fdc1ef": "cet environnement",
   "eee76b40711fd902": "Pilote",
   "21d0ef064eefa159": "Statut",
   "f31ce60f3f118c0d": "Nom affiché",
@@ -12108,14 +12107,6 @@
   "faa3bb26abb39c93": "Échec du guide de revue",
   "b7df38b7d8792d78": "Ouvrir le guide",
   "9e91e9a77b664e4e": "Impossible de démarrer un guide de revue",
-  "40a21a2d19f71308": "CLI Hoplite",
-  "e4fcf63fbf53b2a4": [
-    "Nom ou chemin de l'exécutable sur ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "."
-  ]
+  "f7f0bd6e434b5a97": "Chemin du binaire",
+  "12735c0acd486514": "Chemin du binaire Hoplite utilisé par cette instance."
 }

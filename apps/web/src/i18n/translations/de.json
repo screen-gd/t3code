@@ -8941,7 +8941,6 @@
   "65835a837c643c09": "Auf die Geräteeinstellung zurücksetzen",
   "aea940c95ef946b1": "{provider} aktivieren",
   "74abd6f7968e9fe0": "Instanz {instanceId} löschen",
-  "009e2ca841fdc1ef": "dieser Umgebung",
   "eee76b40711fd902": "Treiber",
   "21d0ef064eefa159": "Status",
   "f31ce60f3f118c0d": "Anzeigename",
@@ -12108,14 +12107,6 @@
   "faa3bb26abb39c93": "Review-Leitfaden fehlgeschlagen",
   "b7df38b7d8792d78": "Leitfaden öffnen",
   "9e91e9a77b664e4e": "Review-Leitfaden konnte nicht gestartet werden",
-  "40a21a2d19f71308": "Hoplite CLI",
-  "e4fcf63fbf53b2a4": [
-    "Programmname oder Pfad auf ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "."
-  ]
+  "f7f0bd6e434b5a97": "Programmpfad",
+  "12735c0acd486514": "Pfad zur Hoplite-Binärdatei dieser Instanz."
 }

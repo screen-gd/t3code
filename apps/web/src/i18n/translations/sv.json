@@ -8947,7 +8947,6 @@
   "65835a837c643c09": "Återställ till enhetens inställning",
   "aea940c95ef946b1": "Aktivera {provider}",
   "74abd6f7968e9fe0": "Ta bort instansen {instanceId}",
-  "009e2ca841fdc1ef": "den här miljön",
   "eee76b40711fd902": "Drivrutin",
   "21d0ef064eefa159": "Status",
   "f31ce60f3f118c0d": "Visningsnamn",
@@ -12115,14 +12114,6 @@
   "faa3bb26abb39c93": "Granskningsguiden misslyckades",
   "b7df38b7d8792d78": "Öppna guiden",
   "9e91e9a77b664e4e": "Kunde inte starta en granskningsguide",
-  "40a21a2d19f71308": "Hoplite CLI",
-  "e4fcf63fbf53b2a4": [
-    "Körbart namn eller sökväg på ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "."
-  ]
+  "f7f0bd6e434b5a97": "Sökväg till binärfil",
+  "12735c0acd486514": "Sökväg till Hoplite-binären som den här instansen använder."
 }

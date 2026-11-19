@@ -8939,7 +8939,6 @@
   "65835a837c643c09": "Restablecer al ajuste del dispositivo",
   "aea940c95ef946b1": "Activar {provider}",
   "74abd6f7968e9fe0": "Eliminar la instancia {instanceId}",
-  "009e2ca841fdc1ef": "este entorno",
   "eee76b40711fd902": "Controlador",
   "21d0ef064eefa159": "Estado",
   "f31ce60f3f118c0d": "Nombre visible",
@@ -12103,14 +12102,6 @@
   "faa3bb26abb39c93": "Falló la guía de revisión",
   "b7df38b7d8792d78": "Abrir guía",
   "9e91e9a77b664e4e": "No se pudo iniciar una guía de revisión",
-  "40a21a2d19f71308": "CLI de Hoplite",
-  "e4fcf63fbf53b2a4": [
-    "Nombre o ruta del ejecutable en ",
-    {
-      "i": 1,
-      "k": "_gt_value_1",
-      "v": "v"
-    },
-    "."
-  ]
+  "f7f0bd6e434b5a97": "Ruta del binario",
+  "12735c0acd486514": "Ruta al binario de Hoplite que usa esta instancia."
 }

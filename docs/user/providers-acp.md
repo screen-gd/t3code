@@ -38,7 +38,8 @@ Hoplite has its own card in **Add provider**. It runs `hoplite acp` from the
 [Hoplite CLI](https://hoplite.sh/docs/cli/acp) on the selected environment, so the Hoplite CLI must be
 installed there. Sign-in opens Hoplite's page in your browser and shows Hoplite's code in T3 Code so
 you can confirm it matches before approving. The **Config** step takes an optional Hoplite project
-ID; without one, each thread uses the Hoplite project linked to its repository.
+ID and binary path (`hoplite` on PATH by default); without a project, each thread uses the Hoplite
+project linked to its repository.
 
 Local commands require no registry entry or download. Environment overrides apply to the command;
 credentials and skills remain managed by the installed agent or its wrapper. Models and reasoning
