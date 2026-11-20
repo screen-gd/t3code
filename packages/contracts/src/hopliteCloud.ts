@@ -3,12 +3,12 @@ import * as Schema from "effect/Schema";
 import { NodeId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 /**
- * Cloud sandbox providers run coding agents in their own sandboxes through an API:
- * Hoplite (hoplite.sh), Devin (devin.ai) and Jules (jules.google). The environment
+ * Cloud sandbox providers run coding agents in their own sandboxes through an API,
+ * such as Hoplite (hoplite.sh). The environment
  * holding a provider's API key starts and reads tasks there; clients and agents only
  * ever see task records, never a key.
  */
-export const CloudSandboxProvider = Schema.Literals(["hoplite", "devin", "jules"]);
+export const CloudSandboxProvider = Schema.Literals(["hoplite"]);
 export type CloudSandboxProvider = typeof CloudSandboxProvider.Type;
 
 const HopliteId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
@@ -75,10 +75,10 @@ export type HopliteCloudTaskResult = typeof HopliteCloudTaskResult.Type;
 
 export const HopliteCloudStartTaskInput = Schema.Struct({
   prompt: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
-  /** Omitted uses Hoplite when it is connected, else the first connected provider. */
+  /** Omitted means Hoplite. */
   provider: Schema.optional(CloudSandboxProvider),
   title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
-  /** A GitHub `owner/name`; the Hoplite project or Jules source with it; Devin gets it in the prompt. */
+  /** A GitHub `owner/name`; the task runs in the Hoplite project that has it. */
   repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /** Hoplite only: a model id or name, such as `gpt-6-luna` or "GPT 6 Luna"; omitted uses Hoplite's default. */
   model: HopliteModel,
@@ -154,7 +154,7 @@ export const HopliteCloudErrorCode = Schema.Literals([
   "model_unavailable",
   "rate_limited",
   "unavailable",
-  /** The provider's API has no way to do this, such as stopping a Jules session. */
+  /** The provider's API has no way to do this. */
   "unsupported",
 ]);
 export type HopliteCloudErrorCode = typeof HopliteCloudErrorCode.Type;

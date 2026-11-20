@@ -133,7 +133,7 @@ it.effect("logs in to Hoplite's ACP connection before loading the thread", () =>
   }),
 );
 
-const subagent = (service: "hoplite" | "devin" | undefined) =>
+const subagent = (service: "hoplite" | undefined) =>
   ({
     id: NodeId.make("task-1"),
     threadId: ThreadId.make("parent"),
@@ -168,7 +168,6 @@ it.effect("streams only tasks delegated to Hoplite from this thread", () =>
       );
 
     assert.strictEqual(yield* watch(undefined), "not_found");
-    assert.strictEqual(yield* watch(subagent("devin")), "unsupported");
     assert.strictEqual(yield* watch(subagent(undefined)), "unsupported");
     assert.deepStrictEqual(watched, []);
 

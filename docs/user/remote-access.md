@@ -286,22 +286,20 @@ For Antigravity's Google callback on a remote host, see
 
 ## Cloud sandbox tasks
 
-T3 Code can hand tasks to cloud agents that run in their own sandboxes:
-[Hoplite](https://hoplite.sh), [Devin](https://devin.ai) and
-[Jules](https://jules.google). Open **Settings → Environments → Add
-environment**, choose **Cloud sandbox**, pick the provider, and paste its API
-key. Each key stays on the machine running T3 Code; clients and agents never
-see it.
+T3 Code can hand tasks to [Hoplite](https://hoplite.sh), which runs cloud
+agents in their own sandboxes. Open **Settings → Environments → Add
+environment**, choose **Cloud sandbox**, and paste a Hoplite API key from
+**Settings → Workspace → API keys** there. The key stays on the machine running
+T3 Code; clients and agents never see it.
 
-Agents can then start a task in a provider's sandbox with the repository it
-names, follow up on it, and get its pull request back in the chat. Each
-provider bills its tasks to your account there. Jules has no API to stop a
-session, so stop those in Jules. **Disconnect** removes a provider's key.
+Agents can then start a task in Hoplite with the repository it names, follow up
+on it, and get its pull request back in the chat. Hoplite bills those tasks to
+your Hoplite workspace. **Disconnect** removes the key.
 
 Click a Hoplite task in the chat or the thread's details to open its chat in
 the side panel, with the agent's live progress. Messages you send there go to
 the task, and the thread's agent hears back when that run finishes, as with its
-own follow-ups. Devin and Jules tasks show only their status and result.
+own follow-ups.
 
 ## Browser on a remote environment
 

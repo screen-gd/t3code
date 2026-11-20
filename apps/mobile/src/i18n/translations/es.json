@@ -4319,6 +4319,7 @@
   "1bd7c7bf63bc77ca": "¿Detener {label}?",
   "b942430dce2fe881": "Detener",
   "318f262e7c81966a": "Agente gestionado por el proveedor. Su trabajo aparece en la transcripción.",
+  "0b4ac67f63bbd44d": "Runs in {label}. Its result appears here when it ends.",
   "3cdda4bfc05d6bf5": "Se ejecuta en {label}. Conéctate a él para abrir su hilo.",
   "8f4c65f679c5c2ae": "Abre el hilo de este agente",
   "4c0433f2ec281a32": "No hay agentes en este turno.",

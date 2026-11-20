@@ -1,4 +1,5 @@
 import type { CloudTaskChatEntry, EnvironmentId, NodeId, ThreadId } from "@t3tools/contracts";
+import { T } from "gt-react";
 import { CheckIcon, CircleAlertIcon, WrenchIcon } from "lucide-react";
 
 import { cn } from "../../lib/utils";
@@ -25,7 +26,11 @@ export default function CloudTaskChatEntries(props: {
     return <CloudTaskChatLoading />;
   }
   if (chat.data.entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">No messages yet.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        <T>No messages yet.</T>
+      </p>
+    );
   }
   return (
     <ol className="flex flex-col gap-3">

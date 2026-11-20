@@ -29,18 +29,12 @@ import * as Stream from "effect/Stream";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import {
-  makeSessionAdapters,
-  PROVIDER_NAMES,
-  providerOfTask,
-  type ProviderSend,
-  type SessionProvider,
-} from "./CloudSandboxProviders.ts";
+import { PROVIDER_NAMES, providerOfTask } from "./CloudSandboxProviders.ts";
 import { HOPLITE_ACP_URL, watchHopliteThreadChat } from "./HopliteTaskChat.ts";
 
 export const HOPLITE_API_BASE_URL = "https://api.hoplite.sh";
 export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
-const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = ["hoplite", "devin", "jules"];
+const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = ["hoplite"];
 /** Hoplite keeps the name its key had before other providers were added. */
 const apiKeySecretFor = (provider: CloudSandboxProvider) =>
   provider === "hoplite" ? HOPLITE_API_KEY_SECRET : `cloud-sandbox-${provider}-api-key`;
@@ -240,8 +234,6 @@ const messageFor = (code: HopliteCloudErrorCode, name: string): string => {
 // its provider's own format; URL-encoding alone still lets `..` through.
 const TASK_ID_FORMATS: Record<CloudSandboxProvider, RegExp> = {
   hoplite: /^thr_[A-Za-z0-9_-]{1,128}$/,
-  devin: /^devin-[0-9a-f]{32}$/,
-  jules: /^[0-9]{1,32}$/,
 };
 const HOPLITE_QUESTION_ID_FORMAT = /^q_[A-Za-z0-9_-]{1,128}$/;
 
@@ -308,42 +300,32 @@ const make = Effect.gen(function* () {
     request: HttpClientRequest.HttpClientRequest,
     schema: Schema.Codec<A, I> | null,
   ): Effect.Effect<A | undefined, HopliteCloudError> =>
-    httpClient
-      .execute(
-        provider === "jules"
-          ? HttpClientRequest.setHeader(request, "X-Goog-Api-Key", apiKey)
-          : HttpClientRequest.bearerToken(request, apiKey),
-      )
-      .pipe(
-        Effect.mapError(() => failure("unavailable", provider)),
-        Effect.flatMap((response) =>
-          response.status < 200 || response.status >= 300
-            ? Effect.fail(failure(codeForStatus(response.status), provider))
-            : schema === null
-              ? Effect.as(response.text.pipe(Effect.ignore), undefined)
-              : HttpClientResponse.schemaBodyJson(schema)(response).pipe(
-                  Effect.mapError(() => failure("unavailable", provider)),
-                ),
-        ),
-        Effect.timeoutOrElse({
-          duration: REQUEST_TIMEOUT,
-          orElse: () => Effect.fail(failure("unavailable", provider)),
-        }),
-        Effect.tapError((error) =>
-          Effect.logWarning("hoplite-cloud.request-failed", { provider, code: error.code }),
-        ),
-        Effect.withTracerEnabled(false),
-      );
+    httpClient.execute(HttpClientRequest.bearerToken(request, apiKey)).pipe(
+      Effect.mapError(() => failure("unavailable", provider)),
+      Effect.flatMap((response) =>
+        response.status < 200 || response.status >= 300
+          ? Effect.fail(failure(codeForStatus(response.status), provider))
+          : schema === null
+            ? Effect.as(response.text.pipe(Effect.ignore), undefined)
+            : HttpClientResponse.schemaBodyJson(schema)(response).pipe(
+                Effect.mapError(() => failure("unavailable", provider)),
+              ),
+      ),
+      Effect.timeoutOrElse({
+        duration: REQUEST_TIMEOUT,
+        orElse: () => Effect.fail(failure("unavailable", provider)),
+      }),
+      Effect.tapError((error) =>
+        Effect.logWarning("hoplite-cloud.request-failed", { provider, code: error.code }),
+      ),
+      Effect.withTracerEnabled(false),
+    );
   const send = <A, I>(
     apiKey: string,
     request: HttpClientRequest.HttpClientRequest,
     schema: Schema.Codec<A, I>,
   ): Effect.Effect<A, HopliteCloudError> =>
     Effect.map(sendAs("hoplite", apiKey, request, schema), (value) => value as A);
-  const sessions = makeSessionAdapters(sendAs as ProviderSend, (provider, code) =>
-    Effect.fail(failure(code, provider)),
-  );
-  const sessionOf = (provider: SessionProvider) => sessions[provider];
 
   const listProjects = Effect.fn("HopliteCloud.listProjects")(function* (apiKey: string) {
     const projects: Array<typeof ProjectRecord.Type> = [];
@@ -366,10 +348,8 @@ const make = Effect.gen(function* () {
     return projects;
   });
 
-  const verifyKey = (provider: CloudSandboxProvider, apiKey: string) =>
-    provider === "hoplite"
-      ? Effect.asVoid(listProjects(apiKey))
-      : sessionOf(provider).verify(apiKey);
+  const verifyKey = (_provider: CloudSandboxProvider, apiKey: string) =>
+    Effect.asVoid(listProjects(apiKey));
 
   const providerStatus = (provider: CloudSandboxProvider) =>
     readSecret(apiKeySecretFor(provider)).pipe(
@@ -463,9 +443,7 @@ const make = Effect.gen(function* () {
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId: taskId,
   }: HopliteCloudGetTaskInput) {
-    const { provider, id: threadId } = yield* taskOf(taskId);
-    if (provider !== "hoplite")
-      return yield* sessionOf(provider).read(yield* keyFor(provider), threadId);
+    const { id: threadId } = yield* taskOf(taskId);
     const apiKey = yield* requireKey;
     const { thread } = yield* send(
       apiKey,
@@ -483,12 +461,6 @@ const make = Effect.gen(function* () {
     Effect.map(readTask(input), ({ task }) => task);
 
   // Hoplite first, as it was the only provider before; then whichever key is stored.
-  const defaultProvider = storedProviders.pipe(
-    Effect.flatMap((stored) =>
-      stored[0] === undefined ? Effect.fail(failure("not_connected")) : Effect.succeed(stored[0]),
-    ),
-  );
-
   // Hoplite would reject an unknown id; this also maps a name the user said to its id.
   const resolveModel = Effect.fn("HopliteCloud.resolveModel")(function* (
     apiKey: string,
@@ -545,17 +517,6 @@ const make = Effect.gen(function* () {
   const startTask = Effect.fn("HopliteCloud.startTask")(function* (
     input: HopliteCloudStartTaskInput,
   ) {
-    const provider = input.provider ?? (yield* defaultProvider);
-    if (provider !== "hoplite") {
-      if (input.model !== undefined) {
-        return yield* new HopliteCloudError({
-          code: "model_unavailable",
-          message: `${PROVIDER_NAMES[provider]} picks its own model; leave \`model\` out.`,
-        });
-      }
-      const task = yield* sessionOf(provider).start(yield* keyFor(provider), input);
-      return { task, runId: null } satisfies HopliteStartedTask;
-    }
     const apiKey = yield* requireKey;
     if (input.repo === undefined) return yield* failure("project_required");
     const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
@@ -576,13 +537,7 @@ const make = Effect.gen(function* () {
   const sendMessage = Effect.fn("HopliteCloud.sendMessage")(function* (
     input: HopliteCloudSendMessageInput,
   ) {
-    const { provider, id } = yield* taskOf(input.threadId);
-    if (provider !== "hoplite") {
-      if (input.model !== undefined) return yield* failure("model_unavailable", provider);
-      yield* sessionOf(provider).sendMessage(yield* keyFor(provider), id, input.message);
-      // The turn shows up in the session's messages once the provider takes it.
-      return { runId: null };
-    }
+    yield* taskOf(input.threadId);
     const apiKey = yield* requireKey;
     const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
     const request = HttpClientRequest.post(`${threadPath(input.threadId)}/messages`).pipe(
@@ -599,15 +554,7 @@ const make = Effect.gen(function* () {
   const stopTask = Effect.fn("HopliteCloud.stopTask")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
-    const session = yield* taskOf(threadId);
-    if (session.provider !== "hoplite") {
-      const adapter = sessionOf(session.provider);
-      const apiKey = yield* keyFor(session.provider);
-      const { run } = yield* adapter.read(apiKey, session.id);
-      if (["queued", "running"].includes(run?.status ?? ""))
-        yield* adapter.stop(apiKey, session.id);
-      return yield* getTask({ threadId });
-    }
+    yield* taskOf(threadId);
     const apiKey = yield* requireKey;
     // Hoplite stops only the run it is told to, so a run that finished meanwhile is never touched.
     const run = yield* readRunState(apiKey, threadId);
@@ -624,14 +571,7 @@ const make = Effect.gen(function* () {
     threadId,
     start,
   }: HopliteCloudPreviewInput) {
-    const { provider } = yield* taskOf(threadId);
-    if (provider !== "hoplite") {
-      return {
-        status: "unsupported",
-        url: null,
-        reason: `${PROVIDER_NAMES[provider]} tasks have no preview here; open the task in ${PROVIDER_NAMES[provider]}.`,
-      } satisfies HopliteCloudPreview;
-    }
+    yield* taskOf(threadId);
     const apiKey = yield* requireKey;
     const request =
       start === true
@@ -670,16 +610,14 @@ const make = Effect.gen(function* () {
   const listQuestions = Effect.fn("HopliteCloud.listQuestions")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
-    // Other providers take questions back as plain follow-up messages.
-    if ((yield* taskOf(threadId)).provider !== "hoplite") return [];
+    yield* taskOf(threadId);
     return yield* fetchQuestions(yield* requireKey, threadId);
   });
 
   const answerQuestion = Effect.fn("HopliteCloud.answerQuestion")(function* (
     input: HopliteCloudAnswerInput,
   ) {
-    const { provider } = yield* taskOf(input.threadId);
-    if (provider !== "hoplite") return yield* failure("unsupported", provider);
+    yield* taskOf(input.threadId);
     if (!HOPLITE_QUESTION_ID_FORMAT.test(input.questionId))
       return yield* invalidId("hoplite", "question");
     const apiKey = yield* requireKey;

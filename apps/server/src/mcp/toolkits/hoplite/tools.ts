@@ -25,7 +25,7 @@ const dependencies = [
 // Status and stopping go through the task's card, with task_status and task_cancel.
 const HopliteTaskTool = Tool.make("cloud_task", {
   description:
-    "Run `prompt` as a cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question (Hoplite). `provider` picks hoplite, devin or jules among the connected ones; omitted uses Hoplite, else the one connected. `repo` is the GitHub owner/name to work in (Jules and Hoplite need it). `model` is Hoplite only, by id or name. Completion wakes you, so end your turn after starting it.",
+    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `repo` is the GitHub owner/name to work in. `model` is by id or name. Completion wakes you, so end your turn after starting it.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
     provider: HopliteCloudStartTaskInput.fields.provider,

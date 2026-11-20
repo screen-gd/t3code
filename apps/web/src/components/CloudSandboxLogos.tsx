@@ -1,7 +1,9 @@
 import type { CloudSandboxProvider } from "@t3tools/contracts";
 
+import { msg } from "gt-react";
+
 import { cn } from "~/lib/utils";
-import { DevinIcon, HopliteIcon, type Icon, JulesIcon } from "./Icons";
+import { HopliteIcon, type Icon } from "./Icons";
 
 export interface CloudSandboxProviderInfo {
   readonly id: CloudSandboxProvider;
@@ -19,21 +21,7 @@ export const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProviderInfo> = 
     name: "Hoplite",
     icon: HopliteIcon,
     keyPlaceholder: "hop_…",
-    keyHelp: "Create a key in Hoplite under Settings → Workspace → API keys.",
-  },
-  {
-    id: "devin",
-    name: "Devin",
-    icon: DevinIcon,
-    keyPlaceholder: "apk_…",
-    keyHelp: "Create a key in Devin under Settings → API keys.",
-  },
-  {
-    id: "jules",
-    name: "Jules",
-    icon: JulesIcon,
-    keyPlaceholder: "Jules API key",
-    keyHelp: "Create a key in Jules under Settings → API keys.",
+    keyHelp: msg("Create a key in Hoplite under Settings → Workspace → API keys."),
   },
 ];
 

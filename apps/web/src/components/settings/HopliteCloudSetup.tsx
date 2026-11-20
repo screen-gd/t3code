@@ -8,6 +8,7 @@ import {
   type AtomCommandResult,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
+import { T, useGT, useMessages } from "gt-react";
 import { useState } from "react";
 
 import { usePrimaryEnvironmentId } from "~/state/environments";
@@ -46,6 +47,8 @@ const providerStatuses = (status: HopliteCloudStatus): ReadonlyArray<CloudSandbo
  * provider's API key and starts the tasks, so a key never comes back to a client once sent.
  */
 export function HopliteCloudSetup() {
+  const gt = useGT();
+  const m = useMessages();
   const environmentId = usePrimaryEnvironmentId();
   const canEdit = useAtomValue(hopliteCloudEnvironment.connect.permissionAtom(environmentId));
   const query = useEnvironmentQuery(
@@ -66,7 +69,7 @@ export function HopliteCloudSetup() {
   if (environmentId === null || !canEdit) {
     return (
       <p className="text-xs text-muted-foreground">
-        Connecting a cloud sandbox needs settings access on this machine.
+        <T>Connecting a cloud sandbox needs settings access on this machine.</T>
       </p>
     );
   }
@@ -82,13 +85,15 @@ export function HopliteCloudSetup() {
       return true;
     }
     const failure = squashAtomCommandFailure(result);
-    setError(failure instanceof Error ? failure.message : "The provider could not be reached.");
+    setError(failure instanceof Error ? failure.message : gt("The provider could not be reached."));
     return false;
   };
 
   if (status === null) {
     return (
-      <p className="text-xs text-muted-foreground">{query.error ?? "Checking cloud sandboxes…"}</p>
+      <p className="text-xs text-muted-foreground">
+        {query.error ?? gt("Checking cloud sandboxes…")}
+      </p>
     );
   }
 
@@ -113,7 +118,7 @@ export function HopliteCloudSetup() {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <span className="flex items-center gap-2 text-sm text-foreground">
                     <CloudSandboxProviderMark provider={info} />
-                    {info.name} connected
+                    {gt("{provider} connected", { provider: info.name })}
                   </span>
                   <Button
                     size="sm"
@@ -125,7 +130,7 @@ export function HopliteCloudSetup() {
                       )
                     }
                   >
-                    Disconnect
+                    <T>Disconnect</T>
                   </Button>
                 </div>
                 {entry.problem ? (
@@ -151,9 +156,11 @@ export function HopliteCloudSetup() {
       >
         {offered.length > 1 ? (
           <div>
-            <span className="mb-1.5 block text-xs font-medium text-foreground">Provider</span>
+            <span className="mb-1.5 block text-xs font-medium text-foreground">
+              <T>Provider</T>
+            </span>
             <ToggleGroup
-              aria-label="Provider"
+              aria-label={gt("Provider")}
               variant="segmented"
               value={[provider]}
               onValueChange={(next) => {
@@ -172,7 +179,7 @@ export function HopliteCloudSetup() {
         ) : null}
         <label className="block">
           <span className="mb-1.5 block text-xs font-medium text-foreground">
-            {selected.name} API key
+            {gt("{provider} API key", { provider: selected.name })}
           </span>
           <Input
             type="password"
@@ -185,7 +192,9 @@ export function HopliteCloudSetup() {
           />
         </label>
         <p className="text-xs text-muted-foreground">
-          {selected.keyHelp} It's saved on this computer and never shown in the app again.
+          {gt("{help} It''s saved on this computer and never shown in the app again.", {
+            help: m(selected.keyHelp),
+          })}
         </p>
         {error ? (
           <Alert variant="error">
@@ -195,10 +204,10 @@ export function HopliteCloudSetup() {
         <div className="flex justify-end">
           <Button type="submit" size="sm" disabled={pending || apiKey.trim() === ""}>
             {pending
-              ? "Connecting…"
+              ? gt("Connecting…")
               : selectedStatus?.connected
-                ? `Replace ${selected.name} key`
-                : `Connect ${selected.name}`}
+                ? gt("Replace {provider} key", { provider: selected.name })
+                : gt("Connect {provider}", { provider: selected.name })}
           </Button>
         </div>
       </form>
@@ -211,6 +220,7 @@ export function HopliteCloudSetup() {
  * pairing a machine, so they stay out of the paired environments list.
  */
 export function HopliteCloudSection() {
+  const gt = useGT();
   const environmentId = usePrimaryEnvironmentId();
   const canEdit = useAtomValue(hopliteCloudEnvironment.connect.permissionAtom(environmentId));
   const query = useEnvironmentQuery(
@@ -226,7 +236,7 @@ export function HopliteCloudSection() {
   const infos = connected.map((entry) => cloudSandboxProviderInfo(entry.provider));
   const problem = connected.find((entry) => entry.problem !== null)?.problem;
   return (
-    <SettingsSection id="hoplite-cloud" title="Cloud agents">
+    <SettingsSection id="hoplite-cloud" title={gt("Cloud agents")}>
       <SettingsRow
         title={
           <span className="flex items-center gap-2">
@@ -236,15 +246,21 @@ export function HopliteCloudSection() {
         }
         description={
           problem ??
-          "Agents can send tasks to these cloud sandboxes. Results come back to the chat."
+          gt("Agents can send tasks to these cloud sandboxes. Results come back to the chat.")
         }
         control={
           <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-            <DialogTrigger render={<Button size="sm" variant="outline" />}>Manage</DialogTrigger>
+            <DialogTrigger render={<Button size="sm" variant="outline" />}>
+              <T>Manage</T>
+            </DialogTrigger>
             <DialogPopup className="sm:max-w-lg">
               <DialogHeader>
-                <DialogTitle>Cloud sandboxes</DialogTitle>
-                <DialogDescription>Keys stay on this machine.</DialogDescription>
+                <DialogTitle>
+                  <T>Cloud sandboxes</T>
+                </DialogTitle>
+                <DialogDescription>
+                  <T>Keys stay on this machine.</T>
+                </DialogDescription>
               </DialogHeader>
               <DialogPanel>
                 <HopliteCloudSetup />

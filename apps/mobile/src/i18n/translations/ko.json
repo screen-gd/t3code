@@ -4306,6 +4306,7 @@
   "1bd7c7bf63bc77ca": "{label}을(를) 중지할까요?",
   "b942430dce2fe881": "중지",
   "318f262e7c81966a": "제공자가 관리하는 에이전트입니다. 작업 내용은 대화 기록에 표시됩니다.",
+  "0b4ac67f63bbd44d": "Runs in {label}. Its result appears here when it ends.",
   "3cdda4bfc05d6bf5": "{label}에서 실행됩니다. 스레드를 열려면 연결하세요.",
   "8f4c65f679c5c2ae": "이 에이전트의 스레드를 엽니다",
   "4c0433f2ec281a32": "이 턴에 에이전트가 없습니다.",

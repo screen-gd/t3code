@@ -4326,6 +4326,7 @@
   "1bd7c7bf63bc77ca": "Stoppa {label}?",
   "b942430dce2fe881": "Stoppa",
   "318f262e7c81966a": "Leverantörshanterad agent. Dess arbete visas i transkriptet.",
+  "0b4ac67f63bbd44d": "Runs in {label}. Its result appears here when it ends.",
   "3cdda4bfc05d6bf5": "Körs på {label}. Anslut till den för att öppna dess tråd.",
   "8f4c65f679c5c2ae": "Öppnar agentens tråd",
   "4c0433f2ec281a32": "Inga agenter i den här omgången.",

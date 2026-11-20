@@ -373,3 +373,29 @@ it.effect("a model named the way a person says it runs as Hoplite's id for it", 
     assert.include(unknown.message, "gpt-6-luna, claude-sonnet-5");
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect("refuses task and question ids outside Hoplite's format before sending the key", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const hoplite = yield* HopliteCloud.HopliteCloud;
+    yield* hoplite.connect("hoplite", GOOD_KEY);
+    const before = harness.sent.length;
+    for (const threadId of ["..", "thr_1/../../projects", "../api/projects"]) {
+      assert.equal(yield* errorCode(hoplite.readTask({ threadId })), "not_found", threadId);
+      assert.equal(
+        yield* errorCode(hoplite.sendMessage({ threadId, message: "hi" })),
+        "not_found",
+        threadId,
+      );
+      assert.equal(yield* errorCode(hoplite.stopTask({ threadId })), "not_found", threadId);
+      assert.equal(yield* errorCode(hoplite.preview({ threadId })), "not_found", threadId);
+    }
+    assert.equal(
+      yield* errorCode(
+        hoplite.answerQuestion({ threadId: "thr_1", questionId: "../../stop", answer: "yes" }),
+      ),
+      "not_found",
+    );
+    assert.equal(harness.sent.length, before);
+  }).pipe(Effect.provide(harness.layer));
+});

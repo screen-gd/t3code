@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { NodeId, ScopedThreadRef } from "@t3tools/contracts";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
+import { T, useGT } from "gt-react";
 import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 
 import { hopliteCloudEnvironment } from "../../state/hopliteCloud";
@@ -11,6 +12,8 @@ import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
 
+const HOPLITE = "Hoplite";
+
 // The chat renders markdown, which task rows should not load until one opens.
 const CloudTaskChatEntries = lazy(() => import("./CloudTaskChatEntries"));
 
@@ -18,7 +21,7 @@ export function CloudTaskChatLoading() {
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <Spinner className="size-4" />
-      Loading chat from Hoplite
+      <T>Loading chat from Hoplite</T>
     </div>
   );
 }
@@ -38,6 +41,7 @@ export default function CloudTaskChatPane(props: {
   readonly title: string;
   readonly onClose: () => void;
 }) {
+  const gt = useGT();
   const { parentRef, taskId } = props;
   const status = useAtomValue(
     environmentThreadDetails.threadAtom(parentRef),
@@ -84,9 +88,14 @@ export default function CloudTaskChatPane(props: {
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pr-1 pl-3">
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{props.title}</span>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {running ? "Running in Hoplite" : "Hoplite"}
+          {running ? gt("Running in Hoplite") : HOPLITE}
         </span>
-        <Button variant="ghost" size="icon-xs" aria-label="Close task chat" onClick={props.onClose}>
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          aria-label={gt("Close task chat")}
+          onClick={props.onClose}
+        >
           <XIcon />
         </Button>
       </div>
@@ -104,8 +113,8 @@ export default function CloudTaskChatPane(props: {
           <div className="relative">
             <Textarea
               size="sm"
-              aria-label="Message the task"
-              placeholder="Message the task"
+              aria-label={gt("Message the task")}
+              placeholder={gt("Message the task")}
               value={draft}
               disabled={busy === "send"}
               onChange={(event) => setDraft(event.target.value)}
@@ -116,7 +125,7 @@ export default function CloudTaskChatPane(props: {
                 <Button
                   variant="outline"
                   size="icon-xs"
-                  aria-label="Stop task"
+                  aria-label={gt("Stop task")}
                   disabled={busy !== null}
                   onClick={() => void stop()}
                 >
@@ -125,7 +134,7 @@ export default function CloudTaskChatPane(props: {
               ) : null}
               <Button
                 size="icon-xs"
-                aria-label="Send"
+                aria-label={gt("Send")}
                 disabled={draft.trim().length === 0 || busy !== null}
                 onClick={() => void send()}
               >
