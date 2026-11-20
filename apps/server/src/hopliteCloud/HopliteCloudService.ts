@@ -53,6 +53,7 @@ import {
   parseTurn,
   READ_TURN_SCRIPT,
   redact,
+  startedRunId,
   STOP_SCRIPT,
 } from "./CloudSandboxTasks.ts";
 import { HOPLITE_ACP_URL, watchHopliteThreadChat } from "./HopliteTaskChat.ts";
@@ -461,7 +462,7 @@ const make = Effect.gen(function* () {
     );
   };
   const startedTasks = new Map<string, HopliteStartedTask>();
-  const sentMessages = new Map<string, { readonly runId: null }>();
+  const sentMessages = new Map<string, { readonly runId: string | null }>();
   const sessionTask = Effect.fn("HopliteCloud.sessionTask")(function* (
     provider: SessionProvider,
     id: string,
@@ -730,7 +731,16 @@ const make = Effect.gen(function* () {
       }
       return yield* remembered(
         startedTasks,
-        input.clientRequestId === undefined ? undefined : `${provider}:${input.clientRequestId}`,
+        // Keyed by what the task asks too, so another caller reusing an id starts its own.
+        input.clientRequestId === undefined
+          ? undefined
+          : [
+              provider,
+              input.clientRequestId,
+              input.prompt,
+              input.repo ?? "",
+              input.title ?? "",
+            ].join("\u0000"),
         startSandboxTask(provider, input),
       );
     }
@@ -774,8 +784,7 @@ const make = Effect.gen(function* () {
     if (ran.exitCode !== 0) {
       return yield* turnFailed(provider, ran, [apiKey, keys.anthropicApiKey, keys.githubToken]);
     }
-    // The new turn shows up in the sandbox's turn count once it starts.
-    return { runId: null };
+    return { runId: startedRunId(ran) };
   });
 
   const sendMessage = Effect.fn("HopliteCloud.sendMessage")(function* (
@@ -788,7 +797,7 @@ const make = Effect.gen(function* () {
         sentMessages,
         input.clientRequestId === undefined
           ? undefined
-          : `${input.threadId}:${input.clientRequestId}`,
+          : [input.threadId, input.clientRequestId, input.message].join("\u0000"),
         sendSandboxMessage(provider, id, input.message),
       );
     }

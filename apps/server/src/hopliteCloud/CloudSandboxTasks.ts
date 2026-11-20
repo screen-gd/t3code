@@ -32,7 +32,14 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
     `echo $(( $(cat "${STATE_DIR}/turn" 2>/dev/null || echo 0) + 1 )) > "${STATE_DIR}/turn"`,
     `setsid nohup bash -c 'npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" ${input.first ? "" : "-c "}--dangerously-skip-permissions --output-format json > "${STATE_DIR}/out.json" 2> "${STATE_DIR}/err.log"; echo $? > "${STATE_DIR}/exit"' > /dev/null 2>&1 &`,
     `echo $! > "${STATE_DIR}/pid"`,
+    `echo "turn=$(cat "${STATE_DIR}/turn")"`,
   ].join("\n");
+
+/** The run id of the turn agentTurnScript started, from the line it ends with. */
+export const startedRunId = (result: CommandResult) => {
+  const turn = [...result.output.matchAll(/^turn=(\d+)$/gm)].at(-1)?.[1];
+  return turn === undefined ? null : `turn-${turn}`;
+};
 
 export const agentTurnEnv = (
   keys: AgentKeys,

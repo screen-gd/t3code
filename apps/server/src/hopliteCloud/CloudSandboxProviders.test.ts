@@ -60,10 +60,16 @@ const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {
     sent.push({ method: request.method, url: request.url, headers: request.headers, body });
     const respond = (status: number, json: unknown) =>
       Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(json, { status })));
-    const reads = body.includes("turn=$(cat");
+    const reads = body.includes("exit=$(cat");
     const starts = body.includes("--dangerously-skip-permissions");
     const exitCode = starts ? turnExit : 0;
-    const output = reads ? readOutput : starts ? "fatal: repository not found" : commandOutput;
+    const output = reads
+      ? readOutput
+      : starts
+        ? exitCode === 0
+          ? "turn=2"
+          : "fatal: repository not found"
+        : commandOutput;
     const route = `${request.method} ${url.host}${url.pathname}`;
     switch (route) {
       case "GET api.e2b.app/v2/sandboxes":
@@ -282,16 +288,18 @@ it.effect("a retried task or follow-up with the same clientRequestId runs once",
     const first = yield* cloud.startTask(start);
     assert.deepStrictEqual(yield* cloud.startTask(start), first);
     const followUp = { threadId: "daytona:dsb-1", message: "More", clientRequestId: "req-2" };
-    yield* cloud.sendMessage(followUp);
-    yield* cloud.sendMessage(followUp);
+    const sent = yield* cloud.sendMessage(followUp);
+    assert.deepStrictEqual(sent, { runId: "turn-2" });
+    assert.deepStrictEqual(yield* cloud.sendMessage(followUp), sent);
+    yield* cloud.startTask({ ...start, prompt: "Another task" });
     const created = harness.sent.filter(
       (request) => request.method === "POST" && request.url.endsWith("/api/sandbox"),
     );
     const turns = harness.sent.filter((request) =>
       request.body.includes("--dangerously-skip-permissions"),
     );
-    assert.lengthOf(created, 1);
-    assert.lengthOf(turns, 2);
+    assert.lengthOf(created, 2);
+    assert.lengthOf(turns, 3);
   }).pipe(Effect.provide(harness.layer));
 });
 
