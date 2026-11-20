@@ -101,11 +101,10 @@ export function HopliteCloudSetup() {
   const connected = statuses.filter((entry) => entry.connected);
   const selected = cloudSandboxProviderInfo(provider);
   const selectedStatus = statuses.find((entry) => entry.provider === provider);
-  // Older servers take a key for Hoplite only.
-  const offered =
-    status.providers === undefined
-      ? CLOUD_SANDBOX_PROVIDERS.filter((entry) => entry.id === "hoplite")
-      : CLOUD_SANDBOX_PROVIDERS;
+  // Only what this server takes a key for; older ones list fewer providers, or none.
+  const offered = CLOUD_SANDBOX_PROVIDERS.filter((entry) =>
+    statuses.some((candidate) => candidate.provider === entry.id),
+  );
 
   return (
     <div className="space-y-4">
