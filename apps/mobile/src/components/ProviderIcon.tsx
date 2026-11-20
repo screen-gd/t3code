@@ -93,6 +93,33 @@ export function ProviderIcon(props: ProviderIconProps) {
       />
     );
   }
+  if (props.provider === "e2b") {
+    return (
+      <Image
+        source={require("../../assets/e2b.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+      />
+    );
+  }
+  if (props.provider === "daytona") {
+    return (
+      <Image
+        source={require("../../assets/daytona.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+      />
+    );
+  }
+  if (props.provider === "agent37") {
+    return (
+      <Image
+        source={require("../../assets/agent37.png")}
+        style={{ width: size, height: size }}
+        contentFit="contain"
+      />
+    );
+  }
   if (props.provider === "acpRegistry") {
     return <AcpRegistryProviderIcon color={mono} iconUrl={props.iconUrl} size={size} />;
   }
