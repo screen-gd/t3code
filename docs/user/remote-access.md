@@ -309,10 +309,11 @@ account there.
 Agents can also create an empty E2B, Daytona or Agent37 sandbox and run
 commands in it themselves. Only the provider key is used for that.
 
-Click a task in the chat or the thread's details to open its chat in the side
-panel. For Hoplite it shows the agent's live progress. Messages you send there
-go to the task, and the thread's agent hears back when that run finishes, as
-with its own follow-ups.
+Click a Hoplite task in the chat or the thread's details to open its chat in
+the side panel, with the agent's live progress. Messages you send there go to
+the task, and the thread's agent hears back when that run finishes, as with its
+own follow-ups. E2B, Daytona and Agent37 tasks have no side-panel chat yet; the
+thread's agent follows up on them itself.
 
 ## Browser on a remote environment
 
