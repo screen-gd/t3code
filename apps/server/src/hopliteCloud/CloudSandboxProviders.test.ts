@@ -1,0 +1,197 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import { assert, it } from "@effect/vitest";
+import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import { HttpClient, HttpClientResponse } from "effect/http";
+
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import { connectEnvelope } from "./CloudSandboxProviders.ts";
+import * as HopliteCloud from "./HopliteCloudService.ts";
+
+const KEYS = { e2b: "e2b_good_key", daytona: "dtn_good_key", agent37: "sk_live_good_key" };
+const ANTHROPIC_KEY = "sk-ant-model-secret";
+const GITHUB_TOKEN = "ghp_github_secret";
+
+interface Sent {
+  readonly method: string;
+  readonly url: string;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly body: string;
+}
+
+// The agent's state files, as READ_TURN_SCRIPT prints them once its first turn finished.
+const finishedTurn = `turn=1\nexit=0\n---\n${JSON.stringify({
+  result: `Opened https://github.com/acme/web/pull/3 with ${ANTHROPIC_KEY} and ${GITHUB_TOKEN}`,
+})}`;
+
+const base64 = (text: string) => btoa(text);
+
+// E2B, Daytona and Agent37 APIs that accept one key each, and record what they were sent.
+const makeHarness = (environment: NodeJS.ProcessEnv) => {
+  const stored = new Map<string, Uint8Array>();
+  const sent: Array<Sent> = [];
+  const secrets = ServerSecretStore.ServerSecretStore.of({
+    get: (name) => Effect.sync(() => Option.fromNullishOr(stored.get(name))),
+    set: (name, value) => Effect.sync(() => void stored.set(name, value)),
+    create: (name, value) => Effect.sync(() => void stored.set(name, value)),
+    getOrCreateRandom: () => Effect.die("unused"),
+    remove: (name) => Effect.sync(() => void stored.delete(name)),
+  });
+  const httpClient = HttpClient.make((request) => {
+    const url = new URL(request.url);
+    const body =
+      request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "";
+    sent.push({ method: request.method, url: request.url, headers: request.headers, body });
+    const respond = (status: number, json: unknown) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(json, { status })));
+    const reads = body.includes("turn=$(cat");
+    const route = `${request.method} ${url.host}${url.pathname}`;
+    switch (route) {
+      case "GET api.e2b.app/v2/sandboxes":
+      case "POST api.e2b.app/sandboxes":
+      case "POST api.e2b.app/sandboxes/isb1/connect":
+        if (request.headers["x-api-key"] !== KEYS.e2b) return respond(401, {});
+        return respond(
+          200,
+          route.startsWith("GET")
+            ? []
+            : { sandboxID: "isb1", envdAccessToken: "envd_token", domain: "e2b.app" },
+        );
+      case "POST 49983-isb1.e2b.app/process.Process/Start": {
+        if (request.headers["x-access-token"] !== "envd_token") return respond(401, {});
+        const frames = [
+          connectEnvelope({ event: { data: { stdout: base64(reads ? finishedTurn : "") } } }),
+          connectEnvelope({ event: { end: { exitCode: 0 } } }),
+        ];
+        const trailer = connectEnvelope({});
+        trailer[0] = 2;
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(request, new Response(new Blob([...frames, trailer]))),
+        );
+      }
+      case "GET app.daytona.io/api/sandbox":
+      case "POST app.daytona.io/api/sandbox":
+      case "GET app.daytona.io/api/sandbox/dsb-1":
+      case "POST proxy.app.daytona.io/toolbox/dsb-1/process/execute":
+        if (request.headers.authorization !== `Bearer ${KEYS.daytona}`) return respond(401, {});
+        if (route.endsWith("/execute"))
+          return respond(200, { exitCode: 0, result: reads ? finishedTurn : "" });
+        if (route === "GET app.daytona.io/api/sandbox") return respond(200, []);
+        return respond(200, {
+          id: "dsb-1",
+          state: route.startsWith("GET") ? "started" : "creating",
+        });
+      case "GET api.agent37.com/v1/instances":
+      case "POST api.agent37.com/v1/instances":
+        if (request.headers.authorization !== `Bearer ${KEYS.agent37}`) return respond(401, {});
+        return respond(200, route.startsWith("GET") ? { instances: [] } : { id: "a37x" });
+      case "POST sandbox.agent37.app/v1/instances/a37x/exec":
+        if (request.headers["x-agent37-key"] !== KEYS.agent37) return respond(401, {});
+        return respond(200, { exit_code: 0, stdout: reads ? finishedTurn : "" });
+    }
+    return respond(404, {});
+  });
+  const layer = HopliteCloud.layer.pipe(
+    Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, secrets)),
+    Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
+    Layer.provide(Layer.succeed(HostProcess.Environment, environment)),
+    Layer.provide(NodeCrypto.layer),
+  );
+  return { sent, layer };
+};
+
+const errorCode = <A, E extends { readonly code: string }, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.flip,
+    Effect.map((error) => error.code),
+  );
+
+const agentEnvironment = { ANTHROPIC_API_KEY: ANTHROPIC_KEY, GH_TOKEN: GITHUB_TOKEN };
+
+it.effect.each([
+  ["e2b", "isb1"],
+  ["daytona", "dsb-1"],
+  ["agent37", "a37x"],
+] as const)(
+  "%s runs Claude Code in a new sandbox and hides every key from its reply",
+  ([provider, sandboxId]) => {
+    const harness = makeHarness(agentEnvironment);
+    return Effect.gen(function* () {
+      const cloud = yield* HopliteCloud.HopliteCloud;
+      assert.equal(yield* errorCode(cloud.connect(provider, "wrong_key_value")), "invalid_key");
+      yield* cloud.connect(provider, KEYS[provider]);
+
+      const started = yield* cloud.startTask({ provider, prompt: "Fix login", repo: "acme/web" });
+      assert.equal(started.task.threadId, `${provider}:${sandboxId}`);
+      const turn = harness.sent.find((request) =>
+        request.body.includes("--dangerously-skip-permissions"),
+      );
+      assert.isDefined(turn);
+      // The model key and GitHub token go in as the agent's environment, never as a URL.
+      assert.include(turn!.body, ANTHROPIC_KEY);
+      assert.isFalse(harness.sent.some((request) => request.url.includes(ANTHROPIC_KEY)));
+
+      const read = yield* cloud.readTask({ threadId: `${provider}:${sandboxId}` });
+      assert.deepInclude(read.task, {
+        status: "ready",
+        pullRequestUrl: "https://github.com/acme/web/pull/3",
+        latestReply: "Opened https://github.com/acme/web/pull/3 with [redacted] and [redacted]",
+      });
+      assert.deepStrictEqual(read.run, { id: "turn-1", status: "completed" });
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect("E2B's key goes only to its API, never to the sandbox's own daemon", () => {
+  const harness = makeHarness(agentEnvironment);
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("e2b", KEYS.e2b);
+    const sandbox = yield* cloud.createSandbox({ provider: "e2b" });
+    const ran = yield* cloud.runInSandbox({ sandboxId: sandbox.sandboxId, command: "ls" });
+    assert.deepStrictEqual(ran, { exitCode: 0, output: "" });
+    const daemon = harness.sent.filter((request) => request.url.includes("49983-isb1"));
+    assert.lengthOf(daemon, 1);
+    assert.isUndefined(daemon[0]!.headers["x-api-key"]);
+    assert.isUndefined(daemon[0]!.headers.authorization);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("refuses sandbox ids outside each provider's format before sending a key", () => {
+  const harness = makeHarness(agentEnvironment);
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    for (const provider of ["e2b", "daytona", "agent37"] as const) {
+      yield* cloud.connect(provider, KEYS[provider]);
+    }
+    const before = harness.sent.length;
+    for (const threadId of ["e2b:../x", "e2b:ISB1", "daytona:-x", "daytona:a/b", "agent37:.."]) {
+      assert.equal(yield* errorCode(cloud.readTask({ threadId })), "not_found");
+      assert.equal(
+        yield* errorCode(cloud.runInSandbox({ sandboxId: threadId, command: "ls" })),
+        "not_found",
+      );
+    }
+    assert.equal(
+      yield* errorCode(cloud.runInSandbox({ sandboxId: "thr_abc", command: "ls" })),
+      "not_found",
+    );
+    assert.equal(harness.sent.length, before);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("asks for a model key before creating a sandbox for a task", () => {
+  const harness = makeHarness({});
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const before = harness.sent.length;
+    assert.equal(
+      yield* errorCode(cloud.startTask({ provider: "daytona", prompt: "Fix", repo: "acme/web" })),
+      "not_connected",
+    );
+    assert.equal(harness.sent.length, before);
+  }).pipe(Effect.provide(harness.layer));
+});

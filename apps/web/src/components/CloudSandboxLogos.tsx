@@ -3,7 +3,7 @@ import type { CloudSandboxProvider } from "@t3tools/contracts";
 import { msg } from "gt-react";
 
 import { cn } from "~/lib/utils";
-import { HopliteIcon, type Icon } from "./Icons";
+import { Agent37Icon, DaytonaIcon, E2BIcon, HopliteIcon, type Icon } from "./Icons";
 
 export interface CloudSandboxProviderInfo {
   readonly id: CloudSandboxProvider;
@@ -22,6 +22,27 @@ export const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProviderInfo> = 
     icon: HopliteIcon,
     keyPlaceholder: "hop_…",
     keyHelp: msg("Create a key in Hoplite under Settings → Workspace → API keys."),
+  },
+  {
+    id: "e2b",
+    name: "E2B",
+    icon: E2BIcon,
+    keyPlaceholder: "e2b_…",
+    keyHelp: msg("Create a key in the E2B dashboard under Keys."),
+  },
+  {
+    id: "daytona",
+    name: "Daytona",
+    icon: DaytonaIcon,
+    keyPlaceholder: "dtn_…",
+    keyHelp: msg("Create a key in the Daytona dashboard under Keys."),
+  },
+  {
+    id: "agent37",
+    name: "Agent37",
+    icon: Agent37Icon,
+    keyPlaceholder: "sk_live_…",
+    keyHelp: msg("Create a key in the Agent37 dashboard under Cloud → API keys."),
   },
 ];
 
@@ -42,7 +63,7 @@ export function CloudSandboxProviderMark({
       aria-hidden
       className={cn(
         "size-4 shrink-0 opacity-100",
-        provider.id === "hoplite" && "overflow-hidden rounded-sm",
+        (provider.id === "hoplite" || provider.id === "e2b") && "overflow-hidden rounded-sm",
         className,
       )}
     />

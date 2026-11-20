@@ -721,7 +721,7 @@ export function AddEnvironmentDialog({
                 : renderConnectionModeCard({
                     mode: "hoplite",
                     title: gt("Cloud sandbox"),
-                    description: gt("Let agents send tasks to Hoplite."),
+                    description: gt("Let agents use Hoplite, E2B, Daytona and Agent37 sandboxes."),
                     icon: <CloudIcon aria-hidden className="size-4" />,
                   })}
             </div>
