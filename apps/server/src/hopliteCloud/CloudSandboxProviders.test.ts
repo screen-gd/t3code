@@ -8,6 +8,7 @@ import { HttpClient, HttpClientResponse } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { connectEnvelope } from "./CloudSandboxProviders.ts";
+import { BUSY_EXIT } from "./CloudSandboxTasks.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
 
 const KEYS = { e2b: "e2b_good_key", daytona: "dtn_good_key", agent37: "sk_live_good_key" };
@@ -22,14 +23,27 @@ interface Sent {
 }
 
 // The agent's state files, as READ_TURN_SCRIPT prints them once its first turn finished.
-const finishedTurn = `turn=1\nexit=0\n---\n${JSON.stringify({
-  result: `Opened https://github.com/acme/web/pull/3 with ${ANTHROPIC_KEY} and ${GITHUB_TOKEN}`,
-})}`;
+const turnOutput = (result: string) =>
+  `turn=1\nexit=0\n---\n${JSON.stringify({ result })}\n---t3-task-err---\nwarn {retrying}`;
+const finishedTurn = turnOutput(
+  `Opened https://github.com/acme/web/pull/3 with ${ANTHROPIC_KEY} and ${GITHUB_TOKEN}, not https://github.com/${GITHUB_TOKEN}/web/pull/4`,
+);
+
+interface HarnessOptions {
+  /** The exit code of the script that starts a turn. */
+  readonly turnExit?: number;
+  readonly readOutput?: string;
+  /** What any other command prints. */
+  readonly commandOutput?: string;
+  /** E2B's stream ends with an RPC error. */
+  readonly e2bError?: boolean;
+}
 
 const base64 = (text: string) => btoa(text);
 
 // E2B, Daytona and Agent37 APIs that accept one key each, and record what they were sent.
-const makeHarness = (environment: NodeJS.ProcessEnv) => {
+const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {}) => {
+  const { turnExit = 0, readOutput = finishedTurn, commandOutput = "", e2bError = false } = options;
   const stored = new Map<string, Uint8Array>();
   const sent: Array<Sent> = [];
   const secrets = ServerSecretStore.ServerSecretStore.of({
@@ -47,6 +61,9 @@ const makeHarness = (environment: NodeJS.ProcessEnv) => {
     const respond = (status: number, json: unknown) =>
       Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(json, { status })));
     const reads = body.includes("turn=$(cat");
+    const starts = body.includes("--dangerously-skip-permissions");
+    const exitCode = starts ? turnExit : 0;
+    const output = reads ? readOutput : starts ? "fatal: repository not found" : commandOutput;
     const route = `${request.method} ${url.host}${url.pathname}`;
     switch (route) {
       case "GET api.e2b.app/v2/sandboxes":
@@ -62,10 +79,12 @@ const makeHarness = (environment: NodeJS.ProcessEnv) => {
       case "POST 49983-isb1.e2b.app/process.Process/Start": {
         if (request.headers["x-access-token"] !== "envd_token") return respond(401, {});
         const frames = [
-          connectEnvelope({ event: { data: { stdout: base64(reads ? finishedTurn : "") } } }),
-          connectEnvelope({ event: { end: { exitCode: 0 } } }),
+          connectEnvelope({ event: { data: { stdout: base64(output) } } }),
+          connectEnvelope({ event: { end: { exitCode } } }),
         ];
-        const trailer = connectEnvelope({});
+        const trailer = connectEnvelope(
+          e2bError ? { error: { code: "deadline_exceeded", message: "timed out" } } : {},
+        );
         trailer[0] = 2;
         return Effect.succeed(
           HttpClientResponse.fromWeb(request, new Response(new Blob([...frames, trailer]))),
@@ -74,11 +93,12 @@ const makeHarness = (environment: NodeJS.ProcessEnv) => {
       case "GET app.daytona.io/api/sandbox":
       case "POST app.daytona.io/api/sandbox":
       case "GET app.daytona.io/api/sandbox/dsb-1":
+      case "DELETE app.daytona.io/api/sandbox/dsb-1":
       case "POST proxy.app.daytona.io/toolbox/dsb-1/process/execute":
         if (request.headers.authorization !== `Bearer ${KEYS.daytona}`) return respond(401, {});
-        if (route.endsWith("/execute"))
-          return respond(200, { exitCode: 0, result: reads ? finishedTurn : "" });
-        if (route === "GET app.daytona.io/api/sandbox") return respond(200, []);
+        if (route.endsWith("/execute")) return respond(200, { exitCode, result: output });
+        if (route === "GET app.daytona.io/api/sandbox" || route.startsWith("DELETE"))
+          return respond(200, []);
         return respond(200, {
           id: "dsb-1",
           state: route.startsWith("GET") ? "started" : "creating",
@@ -89,7 +109,7 @@ const makeHarness = (environment: NodeJS.ProcessEnv) => {
         return respond(200, route.startsWith("GET") ? { instances: [] } : { id: "a37x" });
       case "POST sandbox.agent37.app/v1/instances/a37x/exec":
         if (request.headers["x-agent37-key"] !== KEYS.agent37) return respond(401, {});
-        return respond(200, { exit_code: 0, stdout: reads ? finishedTurn : "" });
+        return respond(200, { exit_code: exitCode, stdout: output });
     }
     return respond(404, {});
   });
@@ -137,7 +157,8 @@ it.effect.each([
       assert.deepInclude(read.task, {
         status: "ready",
         pullRequestUrl: "https://github.com/acme/web/pull/3",
-        latestReply: "Opened https://github.com/acme/web/pull/3 with [redacted] and [redacted]",
+        latestReply:
+          "Opened https://github.com/acme/web/pull/3 with [redacted] and [redacted], not https://github.com/[redacted]/web/pull/4",
       });
       assert.deepStrictEqual(read.run, { id: "turn-1", status: "completed" });
     }).pipe(Effect.provide(harness.layer));
@@ -193,5 +214,95 @@ it.effect("asks for a model key before creating a sandbox for a task", () => {
       "not_connected",
     );
     assert.equal(harness.sent.length, before);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("redacts a key that the reply's length limit would cut in two", () => {
+  const reply = `${"x".repeat(3_990)}${ANTHROPIC_KEY}`;
+  const harness = makeHarness(agentEnvironment, { readOutput: turnOutput(reply) });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const read = yield* cloud.readTask({ threadId: "daytona:dsb-1" });
+    assert.equal(read.task.latestReply, `${"x".repeat(3_990)}[redacted]`);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("hides the agent's keys from commands run in a task's sandbox", () => {
+  const harness = makeHarness(agentEnvironment, {
+    commandOutput: `ANTHROPIC_API_KEY=${ANTHROPIC_KEY}`,
+  });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const ran = yield* cloud.runInSandbox({ sandboxId: "daytona:dsb-1", command: "env" });
+    assert.equal(ran.output, "ANTHROPIC_API_KEY=[redacted]");
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("deletes the sandbox and fails the task when its agent cannot start", () => {
+  const harness = makeHarness(agentEnvironment, { turnExit: 128 });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const error = yield* Effect.flip(
+      cloud.startTask({ provider: "daytona", prompt: "Fix", repo: "acme/missing" }),
+    );
+    assert.equal(error.code, "unavailable");
+    assert.include(error.message, "fatal: repository not found");
+    assert.isTrue(
+      harness.sent.some((request) => request.method === "DELETE" && request.url.endsWith("/dsb-1")),
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("refuses a follow-up while the task's agent still runs", () => {
+  const harness = makeHarness(agentEnvironment, { turnExit: BUSY_EXIT });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const error = yield* Effect.flip(
+      cloud.sendMessage({ threadId: "daytona:dsb-1", message: "Also fix signup" }),
+    );
+    assert.include(error.message, "still on its last message");
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a retried task or follow-up with the same clientRequestId runs once", () => {
+  const harness = makeHarness(agentEnvironment);
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const start = {
+      provider: "daytona",
+      prompt: "Fix",
+      repo: "acme/web",
+      clientRequestId: "req-1",
+    } as const;
+    const first = yield* cloud.startTask(start);
+    assert.deepStrictEqual(yield* cloud.startTask(start), first);
+    const followUp = { threadId: "daytona:dsb-1", message: "More", clientRequestId: "req-2" };
+    yield* cloud.sendMessage(followUp);
+    yield* cloud.sendMessage(followUp);
+    const created = harness.sent.filter(
+      (request) => request.method === "POST" && request.url.endsWith("/api/sandbox"),
+    );
+    const turns = harness.sent.filter((request) =>
+      request.body.includes("--dangerously-skip-permissions"),
+    );
+    assert.lengthOf(created, 1);
+    assert.lengthOf(turns, 2);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("reports E2B's RPC error instead of an empty result", () => {
+  const harness = makeHarness(agentEnvironment, { e2bError: true });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("e2b", KEYS.e2b);
+    assert.equal(
+      yield* errorCode(cloud.runInSandbox({ sandboxId: "e2b:isb1", command: "ls" })),
+      "unavailable",
+    );
   }).pipe(Effect.provide(harness.layer));
 });

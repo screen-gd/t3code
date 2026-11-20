@@ -3,6 +3,7 @@ import type {
   HopliteCloudError,
   HopliteCloudErrorCode,
 } from "@t3tools/contracts";
+import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -27,6 +28,8 @@ const DAYTONA_API_BASE_URL = "https://app.daytona.io/api";
 const DAYTONA_TOOLBOX_BASE_URL = "https://proxy.app.daytona.io/toolbox";
 const AGENT37_API_BASE_URL = "https://api.agent37.com/v1";
 const AGENT37_SANDBOX_BASE_URL = "https://sandbox.agent37.app/v1";
+// Past Daytona's 600-second command limit, so the provider reports a slow command first.
+const COMMAND_TIMEOUT = "11 minutes";
 
 export const providerOfTask = (
   taskId: string,
@@ -51,6 +54,7 @@ export type ProviderSend = <A, I>(
   apiKey: string,
   request: HttpClientRequest.HttpClientRequest,
   schema: Schema.Codec<A, I> | null,
+  timeout?: Duration.Input,
 ) => Effect.Effect<A | undefined, HopliteCloudError>;
 
 /** Like ProviderSend, for a response that is not JSON. */
@@ -58,6 +62,7 @@ export type ProviderSendBytes = (
   provider: SessionProvider,
   apiKey: string,
   request: HttpClientRequest.HttpClientRequest,
+  timeout?: Duration.Input,
 ) => Effect.Effect<Uint8Array, HopliteCloudError>;
 
 export type ProviderFailure = (
@@ -114,6 +119,10 @@ const E2bEvent = Schema.Struct({
   ),
 });
 const decodeE2bEvent = Schema.decodeUnknownOption(Schema.fromJsonString(E2bEvent));
+const E2bEndStream = Schema.Struct({
+  error: Schema.optional(Schema.Struct({ message: Schema.optional(Schema.String) })),
+});
+const decodeE2bEndStream = Schema.decodeUnknownOption(Schema.fromJsonString(E2bEndStream));
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -130,8 +139,11 @@ export const connectEnvelope = (message: unknown): Uint8Array => {
 const fromBase64 = (value: string) =>
   textDecoder.decode(Uint8Array.from(atob(value), (c) => c.charCodeAt(0)));
 
-/** Folds envd's `process.Process/Start` stream into the command's output and exit code. */
-const readConnectStream = (bytes: Uint8Array): CommandResult => {
+/**
+ * Folds envd's `process.Process/Start` stream into the command's output and exit code;
+ * `null` when the stream ends with an RPC error, which Connect sends under HTTP 200.
+ */
+const readConnectStream = (bytes: Uint8Array): CommandResult | null => {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let output = "";
   let exitCode = -1;
@@ -141,7 +153,11 @@ const readConnectStream = (bytes: Uint8Array): CommandResult => {
     const message = textDecoder.decode(bytes.subarray(offset + 5, offset + 5 + length));
     offset += 5 + length;
     // Flag 2 ends the stream with trailers, not an event.
-    if ((flags & 2) !== 0) continue;
+    if ((flags & 2) !== 0) {
+      const end = decodeE2bEndStream(message);
+      if (end._tag === "Some" && end.value.error !== undefined) return null;
+      continue;
+    }
     const event = decodeE2bEvent(message);
     if (event._tag === "None") continue;
     const data = event.value.event?.data;
@@ -154,7 +170,7 @@ const readConnectStream = (bytes: Uint8Array): CommandResult => {
 };
 
 /** E2B runs commands through the in-sandbox daemon's Connect RPC, on a per-sandbox token. */
-const makeE2b = ({ send, sendBytes }: Deps): SessionAdapter => ({
+const makeE2b = ({ send, sendBytes, failure }: Deps): SessionAdapter => ({
   verify: (apiKey) =>
     Effect.asVoid(
       send("e2b", apiKey, HttpClientRequest.get(`${E2B_API_BASE_URL}/v2/sandboxes`), null),
@@ -191,7 +207,8 @@ const makeE2b = ({ send, sendBytes }: Deps): SessionAdapter => ({
         "application/connect+json",
       ),
     );
-    return readConnectStream(yield* sendBytes("e2b", apiKey, request));
+    const result = readConnectStream(yield* sendBytes("e2b", apiKey, request, COMMAND_TIMEOUT));
+    return result ?? (yield* failure("e2b", "unavailable"));
   }),
   remove: (apiKey, id) =>
     Effect.asVoid(
@@ -248,6 +265,7 @@ const makeDaytona = ({ send, failure }: Deps): SessionAdapter => ({
         }),
       ),
       DaytonaExecuted,
+      COMMAND_TIMEOUT,
     ).pipe(Effect.map((done) => ({ exitCode: done!.exitCode ?? 0, output: done!.result }))),
   remove: (apiKey, id) =>
     Effect.asVoid(
@@ -280,7 +298,12 @@ const makeAgent37 = ({ send }: Deps): SessionAdapter => ({
       "agent37",
       apiKey,
       HttpClientRequest.post(`${AGENT37_API_BASE_URL}/instances`).pipe(
-        HttpClientRequest.bodyJsonUnsafe({ template: "agent37-claude-code" }),
+        // Agent37 bills an awake instance until it sleeps, and only sleeps when asked to.
+        HttpClientRequest.bodyJsonUnsafe({
+          template: "agent37-claude-code",
+          auto_sleep: true,
+          idle_timeout_seconds: 3600,
+        }),
       ),
       Agent37Instance,
     ).pipe(Effect.map((instance) => instance!.id)),
@@ -294,6 +317,7 @@ const makeAgent37 = ({ send }: Deps): SessionAdapter => ({
         }),
       ),
       Agent37Executed,
+      COMMAND_TIMEOUT,
     ).pipe(
       Effect.map((done) => ({
         exitCode: done!.exit_code ?? done!.exitCode ?? 0,
