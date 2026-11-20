@@ -413,6 +413,15 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
+  HopliteCloudConnectInput,
+  CloudTaskChatEvent,
+  HopliteCloudDisconnectInput,
+  HopliteCloudError,
+  HopliteCloudStatus,
+  HopliteCloudWatchTaskChatInput,
+  HopliteCloudSendTaskMessageInput,
+} from "./hopliteCloud.ts";
+import {
   ProjectCloneActionInput,
   ProjectCloneActionResult,
   ProjectCloneListEvent,
@@ -591,6 +600,12 @@ export const WS_METHODS = {
 
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
+  hopliteCloudGetStatus: "hopliteCloud.getStatus",
+  hopliteCloudConnect: "hopliteCloud.connect",
+  hopliteCloudDisconnect: "hopliteCloud.disconnect",
+  hopliteCloudWatchTaskChat: "hopliteCloud.watchTaskChat",
+  hopliteCloudSendTaskMessage: "hopliteCloud.sendTaskMessage",
+  hopliteCloudStopTask: "hopliteCloud.stopTask",
 
   pullRequestsList: "pullRequests.list",
   pullRequestsListStats: "pullRequests.listStats",
@@ -1093,6 +1108,43 @@ const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient
   success: RelayClientInstallProgressEventSchema,
   error: Schema.Union([RelayClientInstallFailedError, EnvironmentAuthorizationError]),
   stream: true,
+});
+
+const HopliteCloudRpcError = Schema.Union([HopliteCloudError, EnvironmentAuthorizationError]);
+
+const WsHopliteCloudGetStatusRpc = Rpc.make(WS_METHODS.hopliteCloudGetStatus, {
+  payload: Schema.Struct({}),
+  success: HopliteCloudStatus,
+  error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudConnectRpc = Rpc.make(WS_METHODS.hopliteCloudConnect, {
+  payload: HopliteCloudConnectInput,
+  success: HopliteCloudStatus,
+  error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, {
+  payload: HopliteCloudDisconnectInput,
+  success: HopliteCloudStatus,
+  error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudWatchTaskChatRpc = Rpc.make(WS_METHODS.hopliteCloudWatchTaskChat, {
+  payload: HopliteCloudWatchTaskChatInput,
+  success: CloudTaskChatEvent,
+  error: HopliteCloudRpcError,
+  stream: true,
+});
+
+const WsHopliteCloudSendTaskMessageRpc = Rpc.make(WS_METHODS.hopliteCloudSendTaskMessage, {
+  payload: HopliteCloudSendTaskMessageInput,
+  error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudStopTaskRpc = Rpc.make(WS_METHODS.hopliteCloudStopTask, {
+  payload: HopliteCloudWatchTaskChatInput,
+  error: HopliteCloudRpcError,
 });
 
 const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
@@ -2342,6 +2394,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsHopliteCloudGetStatusRpc,
+  WsHopliteCloudConnectRpc,
+  WsHopliteCloudDisconnectRpc,
+  WsHopliteCloudWatchTaskChatRpc,
+  WsHopliteCloudSendTaskMessageRpc,
+  WsHopliteCloudStopTaskRpc,
   WsPullRequestsListRpc,
   WsPullRequestsListStatsRpc,
   WsPullRequestsFilterOptionsRpc,

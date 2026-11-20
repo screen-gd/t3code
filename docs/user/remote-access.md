@@ -284,6 +284,23 @@ again on its next connect.
 For Antigravity's Google callback on a remote host, see
 [remote sign-in](./providers-antigravity.md#sign-in-from-a-remote-device).
 
+## Cloud sandbox tasks
+
+T3 Code can hand tasks to [Hoplite](https://hoplite.sh), which runs cloud
+agents in their own sandboxes. Open **Settings → Environments → Add
+environment**, choose **Cloud sandbox**, and paste a Hoplite API key from
+**Settings → Workspace → API keys** there. The key stays on the machine running
+T3 Code; clients and agents never see it.
+
+Agents can then start a task in Hoplite with the repository it names, follow up
+on it, and get its pull request back in the chat. Hoplite bills those tasks to
+your Hoplite workspace. **Disconnect** removes the key.
+
+Click a Hoplite task in the chat or the thread's details to open its chat in
+the side panel, with the agent's live progress. Messages you send there go to
+the task, and the thread's agent hears back when that run finishes, as with its
+own follow-ups.
+
 ## Browser on a remote environment
 
 Browser tabs belong to the environment, so you and your agents see the same

@@ -2,7 +2,8 @@ import { T, Var, msg, useGT, useMessages } from "gt-react";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
 import { AgentElapsed } from "./AgentElapsed";
 import { projectedSubagentsToRuntime } from "@t3tools/client-runtime/state/subagentRuntime";
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
+import { openCloudTaskChat } from "./CloudTaskChatPane";
 import { useThreadShell, useProject } from "../../state/entities";
 import { useEnvironment } from "../../state/environments";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -31,6 +32,7 @@ import {
   type OrchestrationV2ModelSwitch,
   type OrchestrationV2Notification,
   type OrchestrationV2TurnItem,
+  type CloudSandboxProvider,
   type OrchestrationV2RemoteTaskChild,
   type OrchestrationV2Subagent,
   type ProviderInstanceId,
@@ -53,6 +55,7 @@ import {
 } from "lucide-react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../ui/tooltip";
+import { CloudSandboxProviderMark, cloudSandboxProviderInfo } from "../CloudSandboxLogos";
 import {
   applyProviderInstanceSettings,
   brandProviderInstanceEntries,
@@ -240,6 +243,7 @@ function SubagentAvatar({
   iconUrl,
   accentColor,
   showBadge,
+  service,
   anyInstanceBadge,
   status,
   className,
@@ -249,6 +253,7 @@ function SubagentAvatar({
   iconUrl?: string | undefined;
   accentColor?: string | undefined;
   showBadge: boolean;
+  service?: CloudSandboxProvider | undefined;
   anyInstanceBadge: boolean;
   status?: OrchestrationV2TurnItem["status"] | undefined;
   className?: string;
@@ -261,7 +266,9 @@ function SubagentAvatar({
         className,
       )}
     >
-      {driver ? (
+      {service ? (
+        <CloudSandboxIcon service={service} />
+      ) : driver ? (
         <ProviderInstanceIcon
           driverKind={driver}
           displayName={displayName ?? driver}
@@ -346,6 +353,7 @@ export function EnvironmentSubagentAvatar({
       iconUrl={iconUrl}
       accentColor={accentColor}
       showBadge={showBadge}
+      service={remote?.service}
       anyInstanceBadge={anyInstanceBadge}
     />
   );
@@ -456,17 +464,22 @@ function SubagentTimelineLink(props: {
   const m = useMessages();
   const navigate = useNavigate();
   const threadId = props.threadId;
+  const showsChat = remote?.service === "hoplite";
   // A task in a linked environment opens there, if this client is connected to it.
   const open =
     threadId !== null
       ? () => props.onOpenThread(threadId)
-      : remote !== undefined && remoteEnvironment !== null
-        ? () =>
-            void navigate({
-              to: "/$environmentId/$threadId",
-              params: buildThreadRouteParams(scopeThreadRef(remote.environmentId, remote.threadId)),
-            })
-        : null;
+      : showsChat
+        ? () => openCloudTaskChat(props.parentRef, props.subagentId, props.title)
+        : remote !== undefined && remoteEnvironment !== null
+          ? () =>
+              void navigate({
+                to: "/$environmentId/$threadId",
+                params: buildThreadRouteParams(
+                  scopeThreadRef(remote.environmentId, remote.threadId),
+                ),
+              })
+          : null;
   const liveStatus = agent?.status ?? props.status;
   const status = props.event ? props.event.status : liveStatus;
   const statusLabel = props.event?.label ?? m(subagentStatusVisual(liveStatus).label);
@@ -761,5 +774,11 @@ function HandoffEndpoint(props: {
         {entry?.displayName ?? props.instanceId} · {label}
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+function CloudSandboxIcon({ service }: { service: CloudSandboxProvider }) {
+  return (
+    <CloudSandboxProviderMark provider={cloudSandboxProviderInfo(service)} className="size-3.5" />
   );
 }

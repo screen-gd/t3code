@@ -177,7 +177,11 @@ function SubagentMetadata(props: {
       ) : driver === undefined ? (
         <SymbolView name="robot" size={11} tintColorClassName="accent-icon-muted" />
       ) : (
-        <ProviderIcon provider={driver} iconUrl={provider?.iconUrl} size={12} />
+        <ProviderIcon
+          provider={subagent.remoteChild?.service ?? driver}
+          iconUrl={provider?.iconUrl}
+          size={12}
+        />
       )}
       <Text className="min-w-0 shrink text-xs text-foreground-muted" numberOfLines={1}>
         {provider ? `${resolveProviderInstanceDisplayName(provider)} · ` : ""}

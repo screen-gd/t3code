@@ -1,7 +1,7 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
 import { pipe } from "effect/Function";
-import { ChevronsLeftRightEllipsisIcon, PlusIcon, TerminalIcon } from "lucide-react";
+import { ChevronsLeftRightEllipsisIcon, CloudIcon, PlusIcon, TerminalIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { T, useGT, useMessages, Var } from "gt-react";
@@ -21,6 +21,7 @@ import * as Option from "effect/Option";
 
 import { cn } from "../../lib/utils";
 import { formatDesktopSshTarget } from "./EnvironmentRow";
+import { HopliteCloudSetup } from "./HopliteCloudSetup";
 import { Input } from "../ui/input";
 import { CommandShortcut } from "../ui/command";
 import {
@@ -118,7 +119,7 @@ export function AddEnvironmentDialog({
     }
     return keys;
   })();
-  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh">("remote");
+  const [savedBackendMode, setSavedBackendMode] = useState<"remote" | "ssh" | "hoplite">("remote");
   const [savedBackendHost, setSavedBackendHost] = useState("");
   const [savedBackendPairingCode, setSavedBackendPairingCode] = useState("");
   const [savedBackendSshHost, setSavedBackendSshHost] = useState("");
@@ -370,7 +371,7 @@ export function AddEnvironmentDialog({
     setSavedBackendHost(value);
   };
   const renderConnectionModeCard = (input: {
-    readonly mode: "remote" | "ssh";
+    readonly mode: "remote" | "ssh" | "hoplite";
     readonly title: string;
     readonly description: string;
     readonly icon?: ReactNode;
@@ -695,7 +696,12 @@ export function AddEnvironmentDialog({
         </DialogHeader>
         <DialogPanel>
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div
+              className={cn(
+                "grid gap-3 sm:grid-cols-2",
+                desktopBridge && !routeTarget && "sm:grid-cols-3",
+              )}
+            >
               {renderConnectionModeCard({
                 mode: "remote",
                 title: gt("Remote link"),
@@ -706,13 +712,27 @@ export function AddEnvironmentDialog({
                 ? renderConnectionModeCard({
                     mode: "ssh",
                     title: SSH_PROTOCOL_NAME,
-                    description: gt("Use local SSH config, agent, and tunnels for the backend."),
+                    description: gt("Use your SSH config, agent, and tunnels."),
                     icon: <TerminalIcon aria-hidden className="size-4" />,
                   })
                 : null}
+              {routeTarget
+                ? null
+                : renderConnectionModeCard({
+                    mode: "hoplite",
+                    title: gt("Cloud sandbox"),
+                    description: gt("Let agents send tasks to Hoplite."),
+                    icon: <CloudIcon aria-hidden className="size-4" />,
+                  })}
             </div>
             <AnimatedHeight>
-              {savedBackendMode === "ssh" ? renderSshFields() : renderRemoteModeBody()}
+              {savedBackendMode === "ssh" ? (
+                renderSshFields()
+              ) : savedBackendMode === "hoplite" ? (
+                <HopliteCloudSetup />
+              ) : (
+                renderRemoteModeBody()
+              )}
             </AnimatedHeight>
           </div>
         </DialogPanel>

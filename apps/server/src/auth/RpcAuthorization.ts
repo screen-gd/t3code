@@ -127,6 +127,13 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.scheduledTasksGetWebhookDelivery]: AuthOrchestrationOperateScope,
   [WS_METHODS.cloudGetRelayClientStatus]: AuthRelayReadScope,
   [WS_METHODS.cloudInstallRelayClient]: AuthRelayWriteScope,
+  // Status reveals whether the controller's Hoplite key works, which settings writers manage.
+  [WS_METHODS.hopliteCloudGetStatus]: AuthSettingsWriteScope,
+  // A task's chat is part of the thread that delegated it.
+  [WS_METHODS.hopliteCloudWatchTaskChat]: AuthOrchestrationReadScope,
+  // These spend the controller's Hoplite key, as an agent's cloud_task call does.
+  [WS_METHODS.hopliteCloudSendTaskMessage]: AuthOrchestrationOperateScope,
+  [WS_METHODS.hopliteCloudStopTask]: AuthOrchestrationOperateScope,
   [WS_METHODS.pullRequestsList]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsListStats]: AuthOrchestrationReadScope,
   [WS_METHODS.pullRequestsFilterOptions]: AuthOrchestrationReadScope,

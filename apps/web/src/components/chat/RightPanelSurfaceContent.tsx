@@ -13,6 +13,7 @@ import type {
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { lazy, Suspense } from "react";
 import SideChatPane from "./SideChatPane";
+import CloudTaskChatPane from "./CloudTaskChatPane";
 import type { ComposerImageAttachment, DraftId } from "../../composerDraftStore";
 import type { ShortcutMatchContext } from "../../keybindings";
 import type { SideChatParentPanel } from "../../lib/sideChatPane";
@@ -220,6 +221,16 @@ export function RightPanelSurfaceContent(props: {
           parentRef={threadRef}
           threadId={surface.threadId}
           parentPanel={props.sideChatParentPanel}
+          onClose={() => onCloseSurface(surface)}
+        />
+      );
+    case "cloud-task":
+      return (
+        <CloudTaskChatPane
+          key={surface.id}
+          parentRef={threadRef}
+          taskId={surface.taskId}
+          title={surface.title}
           onClose={() => onCloseSurface(surface)}
         />
       );

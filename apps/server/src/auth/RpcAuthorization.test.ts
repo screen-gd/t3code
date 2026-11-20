@@ -58,6 +58,16 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("keeps the Hoplite key behind settings scope", () => {
+    for (const method of [
+      WS_METHODS.hopliteCloudGetStatus,
+      WS_METHODS.hopliteCloudConnect,
+      WS_METHODS.hopliteCloudDisconnect,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthSettingsWriteScope);
+    }
+  });
+
   it("separates passive terminal observation from operations that can change a shell", () => {
     for (const method of [WS_METHODS.terminalObserve, WS_METHODS.subscribeTerminalMetadata]) {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthTerminalReadScope);

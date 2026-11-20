@@ -3,6 +3,7 @@ import { msg } from "gt-react";
 import { BotIcon, type LucideIcon } from "lucide-react";
 import { m, type MessageResolver } from "../../i18n/messages";
 import { cn } from "../../lib/utils";
+import type { Icon } from "../Icons";
 import {
   hasInstanceBadge,
   shouldShowInstanceBadge,
@@ -66,7 +67,7 @@ export function ThreadRelationshipIcon({
   /** For rows that can't take `providerEntries` but sit in the same list as rows that do. */
   anyInstanceBadge?: boolean;
   status: string | null;
-  fallbackIcon?: LucideIcon;
+  fallbackIcon?: LucideIcon | Icon;
 }) {
   const iconClassName = "size-4 shrink-0 text-muted-foreground";
   const entry = driver

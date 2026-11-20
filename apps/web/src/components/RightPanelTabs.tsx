@@ -53,6 +53,7 @@ import {
   Volume2Icon,
   VolumeOffIcon,
 } from "lucide-react";
+import { CloudSandboxProviderMark, cloudSandboxProviderInfo } from "./CloudSandboxLogos";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
@@ -614,6 +615,8 @@ function surfaceTitle(
       return surface.title ?? surface.target?.name ?? resolve(msg("Device"));
     case "side-chat":
       return resolve(msg("Side chat"));
+    case "cloud-task":
+      return surface.title;
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return resolve(msg("Browser"));
@@ -706,6 +709,13 @@ function SurfaceIcon({
       return <IssueSurfaceIcon surface={surface} environmentId={environmentId} />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
+    case "cloud-task":
+      return (
+        <CloudSandboxProviderMark
+          provider={cloudSandboxProviderInfo("hoplite")}
+          className="size-3 shrink-0"
+        />
+      );
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />

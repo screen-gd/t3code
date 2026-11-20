@@ -169,9 +169,13 @@ function AgentRow(props: {
         accessibilityHint={
           subagent.remoteChild === undefined
             ? gt("Provider-managed agent. Its work appears in the transcript.")
-            : gt("Runs on {label}. Connect to it to open its thread.", {
-                label: subagent.remoteChild.label,
-              })
+            : subagent.remoteChild.service !== undefined
+              ? gt("Runs in {label}. Its result appears here when it ends.", {
+                  label: subagent.remoteChild.label,
+                })
+              : gt("Runs on {label}. Connect to it to open its thread.", {
+                  label: subagent.remoteChild.label,
+                })
         }
       >
         {row}

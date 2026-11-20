@@ -101,6 +101,7 @@ import {
   ThreadId,
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
+  type HopliteCloudWatchTaskChatInput,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -260,6 +261,13 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReactor.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
+import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
+import {
+  reloadOnActivity,
+  resolveHopliteTask,
+  watchTaskChat,
+} from "./hopliteCloud/HopliteTaskChat.ts";
+import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as TextGenerators from "./textGeneration/TextGenerators.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as SourceControlSignIn from "./sourceControl/SourceControlSignIn.ts";
@@ -1582,6 +1590,13 @@ export const layerWsRpc = (
       const sourceControlDiscovery = yield* SourceControlDiscovery.SourceControlDiscovery;
       const secretCheck = yield* SecretCheck.SecretCheck;
       const otlpEndpointCheck = yield* OtlpEndpointCheck.OtlpEndpointCheck;
+      const hopliteCloud = yield* HopliteCloud.HopliteCloud;
+      const taskThreads = yield* ThreadManagementService.ThreadManagementService;
+      const hopliteTaskWatch = yield* HopliteTaskWatch.HopliteTaskWatch;
+      const readDelegatedTask = ({ threadId, taskId }: HopliteCloudWatchTaskChatInput) =>
+        taskThreads
+          .getThreadRecords(threadId, ["subagents"], { subagentIds: [taskId] })
+          .pipe(Effect.map(({ subagents }) => subagents[0]));
       const textGenerators = yield* TextGenerators.TextGenerators;
       const sourceControlRepositories =
         yield* SourceControlRepositoryService.SourceControlRepositoryService;
@@ -2760,6 +2775,41 @@ export const layerWsRpc = (
               ),
             ),
           ),
+        [WS_METHODS.hopliteCloudGetStatus]: (_input) => hopliteCloud.status,
+        [WS_METHODS.hopliteCloudConnect]: (input) =>
+          hopliteCloud.connect(input.provider ?? "hoplite", input.apiKey),
+        [WS_METHODS.hopliteCloudDisconnect]: (input) =>
+          hopliteCloud.disconnect(input.provider ?? "hoplite"),
+        [WS_METHODS.hopliteCloudWatchTaskChat]: (input) =>
+          watchTaskChat(
+            {
+              readTask: readDelegatedTask,
+              watchThreadChat: (hopliteThreadId) =>
+                reloadOnActivity(
+                  hopliteCloud.watchThreadChat(hopliteThreadId),
+                  hopliteTaskWatch.threadActivity(hopliteThreadId),
+                ),
+            },
+            input,
+          ),
+        // Sent as the delegating thread, so its task card follows the new run like an agent's follow-up.
+        [WS_METHODS.hopliteCloudSendTaskMessage]: (input) =>
+          resolveHopliteTask(readDelegatedTask, input).pipe(
+            Effect.flatMap((hopliteThreadId) =>
+              hopliteTaskWatch.sendMessage(
+                { threadId: hopliteThreadId, message: input.message },
+                input.threadId,
+              ),
+            ),
+            Effect.asVoid,
+          ),
+        [WS_METHODS.hopliteCloudStopTask]: (input) =>
+          resolveHopliteTask(readDelegatedTask, input).pipe(
+            Effect.flatMap((hopliteThreadId) =>
+              hopliteTaskWatch.stopTask({ threadId: hopliteThreadId }),
+            ),
+            Effect.asVoid,
+          ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>
@@ -3615,6 +3665,7 @@ export const layer = Layer.unwrap(
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
+    const hopliteTaskWatch = yield* HopliteTaskWatch.HopliteTaskWatch;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3707,6 +3758,8 @@ export const layer = Layer.unwrap(
                 Layer.succeed(IssueTrackerConnections.IssueTrackerConnections, issueTrackers),
               ),
               Layer.provide(OtlpEndpointCheck.layer),
+              Layer.provide(HopliteCloud.layer),
+              Layer.provide(Layer.succeed(HopliteTaskWatch.HopliteTaskWatch, hopliteTaskWatch)),
               Layer.provide(
                 Layer.succeed(
                   PullRequestReviewGuideService.PullRequestReviewGuideService,

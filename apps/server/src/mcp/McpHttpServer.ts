@@ -76,6 +76,8 @@ import {
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
+import * as HopliteHandlers from "./toolkits/hoplite/handlers.ts";
+import { HopliteToolkit } from "./toolkits/hoplite/tools.ts";
 import * as WorktreeHandlers from "./toolkits/worktree/handlers.ts";
 import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
@@ -1344,6 +1346,8 @@ const layerThemeToolkit = toolkitRegistration(ThemeToolkit, ThemeHandlers.layer)
 
 export const layerProjectRegistration = toolkitRegistration(ProjectToolkit, ProjectHandlers.layer);
 
+const layerHopliteToolkit = toolkitRegistration(HopliteToolkit, HopliteHandlers.layer);
+
 export const layerAttachmentToolkit = toolkitRegistration(
   AttachmentToolkit,
   AttachmentHandlers.layer,
@@ -1415,6 +1419,7 @@ export const layerTools = Layer.mergeAll(
   layerIssuesToolkit,
   layerDeviceToolkit,
   layerHtmlToolkit,
+  layerHopliteToolkit,
   layerMessageToolkit,
 );
 
