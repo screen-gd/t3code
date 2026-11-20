@@ -80,25 +80,6 @@ const handlers = {
       Effect.mapError(toFailure),
     ),
   ),
-  sandbox_create: McpToolAccess.writesWithCapability((input) =>
-    HopliteCloud.HopliteCloud.pipe(
-      Effect.flatMap((cloud) => cloud.createSandbox(input)),
-      Effect.mapError(toFailure),
-    ),
-  ),
-  sandbox_run: McpToolAccess.writesWithCapability((input) =>
-    HopliteCloud.HopliteCloud.pipe(
-      Effect.flatMap((cloud) => cloud.runInSandbox(input)),
-      Effect.mapError(toFailure),
-    ),
-  ),
-  sandbox_delete: McpToolAccess.writesWithCapability((input) =>
-    HopliteCloud.HopliteCloud.pipe(
-      Effect.flatMap((cloud) => cloud.deleteSandbox(input)),
-      Effect.as({}),
-      Effect.mapError(toFailure),
-    ),
-  ),
 } satisfies McpToolAccess.Handlers<typeof HopliteToolkit.tools>;
 
 export const layer = McpToolAccess.toLayer(HopliteToolkit, handlers);

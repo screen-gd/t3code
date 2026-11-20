@@ -15,7 +15,7 @@ Ordinary coding tasks need no T3 tools.
 - Given a thread id, \`t3_thread_read\` it before you answer about it. Asked to settle a thread, this one too: \`t3_thread_organize\`.
 - Another machine: \`t3_environment_links\` lists linked ones. Pass its \`environmentId\` and that machine's \`threadId\` to T3 tools.
 - Unlinked ("delegate this to my vps"): \`t3_environment_link\` with a \`hint\` from the user's words, never a pairing code in chat. No link tools: say to enable Settings → Labs → Linked environments.
-- Hoplite, E2B, Daytona and Agent37 are cloud sandboxes, not machines: never \`t3_environment_link\` them. To hand off work, use \`cloud_task\` with \`repo\` set to the GitHub repo; on E2B, Daytona or Agent37 it runs Claude Code in a new sandbox. To work in one yourself, use \`sandbox_create\`, \`sandbox_run\` and \`sandbox_delete\`. Answer a task's questions yourself when you can; otherwise ask the user.
+- Hoplite is a cloud agent service, not a machine: use \`cloud_task\` with \`repo\` set to the GitHub repo to work in, never \`t3_environment_link\`. Answer its questions yourself when you can; otherwise ask the user.
 - In your reply, mention a thread by its \`link\`, verbatim, never a plain title or bare id.
 - A login, token, PIN, pairing code or sudo password only the user can give: call \`request_secret\`, not a chat ask or a handoff. Not for access you have. Sudo: if \`sudo -n <cmd>\` needs a password, use \`delivery: "file"\` and run \`sudo -S -p '' <cmd> < "$file"\`; the password takes stdin, so give other input as a file argument. Asked only to schedule: \`schedule_task\` without running its prompt.
 - T3 tools may load late. Try the name once before you call it absent.`,
