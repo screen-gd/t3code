@@ -16,8 +16,12 @@ it("refuses a turn while the last turn's agent still runs", () => {
     // This test's own process stands in for the running agent.
     NodeFS.writeFileSync(NodePath.join(state, "pid"), String(process.pid));
     NodeFS.writeFileSync(NodePath.join(state, "turn"), "1");
+    // A stub npx, so a regressed guard starts nothing real.
+    const bin = NodePath.join(home, "bin");
+    NodeFS.mkdirSync(bin);
+    NodeFS.writeFileSync(NodePath.join(bin, "npx"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
     const run = NodeChildProcess.spawnSync("bash", ["-c", agentTurnScript({ first: false })], {
-      env: { PATH: process.env.PATH, HOME: home },
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: home },
     });
     assert.equal(run.status, BUSY_EXIT);
     assert.equal(NodeFS.readFileSync(NodePath.join(state, "turn"), "utf8"), "1");
