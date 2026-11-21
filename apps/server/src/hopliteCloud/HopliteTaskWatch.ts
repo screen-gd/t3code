@@ -203,6 +203,8 @@ export class HopliteTaskWatch extends Context.Service<
     readonly sweep: Effect.Effect<void>;
     /** Fires when a Hoplite thread's chat may have changed: a message, answer or stop sent, or a run settled. */
     readonly threadActivity: (hopliteThreadId: string) => Stream.Stream<void>;
+    /** Whether a run on this Hoplite thread is still being watched to settle. */
+    readonly watching: (hopliteThreadId: string) => Effect.Effect<boolean>;
   }
 >()("t3/hopliteCloud/HopliteTaskWatch") {}
 
@@ -602,6 +604,10 @@ const make = Effect.gen(function* () {
     stopTask,
     sweep,
     threadActivity,
+    watching: Effect.fn("HopliteTaskWatch.watching")(function* (hopliteThreadId: string) {
+      const current = yield* Ref.get(watches);
+      return current.some((entry) => entry.hopliteThreadId === hopliteThreadId);
+    }),
   });
 });
 

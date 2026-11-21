@@ -1,10 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { NodeId, ScopedThreadRef } from "@t3tools/contracts";
+import { AsyncResult } from "effect/reactivity";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
 import { T, useGT } from "gt-react";
 import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 
 import { hopliteCloudEnvironment } from "../../state/hopliteCloud";
+import { useEnvironmentQuerySelector } from "../../state/query";
 import { environmentThreadDetails } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRightPanelStore } from "../../rightPanelStore";
@@ -16,6 +18,10 @@ const HOPLITE = "Hoplite";
 
 // The chat renders markdown, which task rows should not load until one opens.
 const CloudTaskChatEntries = lazy(() => import("./CloudTaskChatEntries"));
+
+const chatRunning = <E,>(
+  result: AsyncResult.AsyncResult<{ readonly running: boolean | null }, E>,
+) => AsyncResult.getOrElse(result, () => null)?.running ?? null;
 
 export function CloudTaskChatLoading() {
   return (
@@ -47,6 +53,14 @@ export default function CloudTaskChatPane(props: {
     environmentThreadDetails.threadAtom(parentRef),
     (thread) => thread?.projection.subagents.find((agent) => agent.id === taskId)?.status ?? null,
   );
+  // The same subscription the entries render; it knows about runs started from this pane.
+  const chatIsRunning = useEnvironmentQuerySelector(
+    hopliteCloudEnvironment.taskChat({
+      environmentId: parentRef.environmentId,
+      input: { threadId: parentRef.threadId, taskId },
+    }),
+    chatRunning,
+  );
   const canOperate = useAtomValue(
     hopliteCloudEnvironment.sendTaskMessage.permissionAtom(parentRef.environmentId),
   );
@@ -54,7 +68,7 @@ export default function CloudTaskChatPane(props: {
   const stopTask = useAtomCommand(hopliteCloudEnvironment.stopTask);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<"send" | "stop" | null>(null);
-  const running = status === "running" || status === "pending";
+  const running = chatIsRunning ?? (status === "running" || status === "pending");
   const input = { threadId: parentRef.threadId, taskId };
 
   const send = async () => {

@@ -13,17 +13,21 @@ export interface CloudTaskChat {
   readonly entries: ReadonlyArray<CloudTaskChatEntry>;
   /** False while the history is still replaying. */
   readonly live: boolean;
+  /** Whether the task's run is going; null until the server says, as older servers never do. */
+  readonly running: boolean | null;
 }
 
-export const EMPTY_CLOUD_TASK_CHAT: CloudTaskChat = { entries: [], live: false };
+export const EMPTY_CLOUD_TASK_CHAT: CloudTaskChat = { entries: [], live: false, running: null };
 
 export function applyCloudTaskChatEvent(
   chat: CloudTaskChat,
   event: CloudTaskChatEvent,
 ): CloudTaskChat {
   switch (event._tag) {
-    case "live":
-      return chat.live ? chat : { ...chat, live: true };
+    case "live": {
+      const running = event.running ?? chat.running;
+      return chat.live && chat.running === running ? chat : { ...chat, live: true, running };
+    }
     case "replace":
       return { ...chat, entries: [...event.entries] };
     case "upsert": {

@@ -13,6 +13,7 @@ import {
   reloadOnActivity,
   watchAcpThreadChat,
   watchTaskChat,
+  withRunning,
 } from "./HopliteTaskChat.ts";
 
 const text = (value: string) => ({ type: "text" as const, text: value });
@@ -219,6 +220,25 @@ it.effect("replays the chat as one replacement when the task has activity", () =
         ],
       },
       live,
+    ]);
+  }),
+);
+
+it.effect("marks each live event with whether the run is going when it passes", () =>
+  Effect.gen(function* () {
+    const states = [true, false];
+    const upsert = {
+      _tag: "upsert" as const,
+      entry: { _tag: "message" as const, id: "m1", role: "user" as const, text: "Fix login" },
+    };
+    const events = yield* withRunning(
+      Stream.make(upsert, { _tag: "live" as const }, { _tag: "live" as const }),
+      Effect.sync(() => states.shift() ?? false),
+    ).pipe(Stream.runCollect);
+    assert.deepStrictEqual(events, [
+      upsert,
+      { _tag: "live", running: true },
+      { _tag: "live", running: false },
     ]);
   }),
 );

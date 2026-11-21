@@ -147,8 +147,8 @@ const socketStdio = Effect.fn("HopliteTaskChat.socketStdio")(function* (socket: 
 
 /**
  * Streams a Hoplite thread's chat over ACP v1: `session/load` replays the latest
- * messages, then the session keeps receiving activity from other clients, such as
- * the runs T3 starts through the REST API. v2 does not forward that activity yet.
+ * messages. Runs T3 starts through the REST API never reach the open session, so
+ * `reloadOnActivity` loads it again after each one.
  */
 export const watchHopliteThreadChat = (input: {
   readonly socket: Socket.Socket;
@@ -246,6 +246,17 @@ export const reloadOnActivity = <E>(
     Stream.make(true),
     Stream.map(activity, () => false),
   ).pipe(Stream.switchMap((first) => (first ? open : replayed(open))));
+
+/** Marks each `live` event with whether the task's run is still going, read as it passes. */
+export const withRunning = <E>(
+  chat: Stream.Stream<CloudTaskChatEvent, E>,
+  running: Effect.Effect<boolean>,
+): Stream.Stream<CloudTaskChatEvent, E> =>
+  Stream.mapEffect(chat, (event) =>
+    event._tag === "live"
+      ? Effect.map(running, (value): CloudTaskChatEvent => ({ _tag: "live", running: value }))
+      : Effect.succeed(event),
+  );
 
 type ReadTask<E> = (
   input: HopliteCloudWatchTaskChatInput,
