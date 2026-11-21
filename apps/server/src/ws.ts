@@ -3670,6 +3670,7 @@ export const layer = Layer.unwrap(
     const peerLinks = yield* PeerLinks.PeerLinks;
     const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
     const hopliteTaskWatch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    const hopliteCloud = yield* HopliteCloud.HopliteCloud;
     const sql = yield* SqlClient.SqlClient;
     return HttpRouter.add(
       "GET",
@@ -3762,7 +3763,8 @@ export const layer = Layer.unwrap(
                 Layer.succeed(IssueTrackerConnections.IssueTrackerConnections, issueTrackers),
               ),
               Layer.provide(OtlpEndpointCheck.layer),
-              Layer.provide(HopliteCloud.layer),
+              // The watcher's own instance, so chat panes and the watcher share one connection state.
+              Layer.provide(Layer.succeed(HopliteCloud.HopliteCloud, hopliteCloud)),
               Layer.provide(Layer.succeed(HopliteTaskWatch.HopliteTaskWatch, hopliteTaskWatch)),
               Layer.provide(
                 Layer.succeed(
