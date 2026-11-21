@@ -348,8 +348,21 @@ const make = Effect.gen(function* () {
     return projects;
   });
 
+  // One project is enough to prove the key works.
   const verifyKey = (_provider: CloudSandboxProvider, apiKey: string) =>
-    Effect.asVoid(listProjects(apiKey));
+    Effect.asVoid(
+      send(
+        apiKey,
+        HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
+          HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
+        ),
+        ProjectsPage,
+      ),
+    );
+
+  // Normalized repo -> project id, so a task skips listing every project. Cleared whenever the
+  // key changes, as another key may see other projects.
+  const projectIds = new Map<string, string>();
 
   const providerStatus = (provider: CloudSandboxProvider) =>
     readSecret(apiKeySecretFor(provider)).pipe(
@@ -394,6 +407,7 @@ const make = Effect.gen(function* () {
     // Check the key before saving it so a typo never replaces a working one.
     yield* verifyKey(provider, apiKey);
     yield* saveSecret(apiKeySecretFor(provider), apiKey);
+    projectIds.clear();
     return yield* status;
   });
 
@@ -401,6 +415,7 @@ const make = Effect.gen(function* () {
     provider: CloudSandboxProvider,
   ) {
     yield* removeSecret(apiKeySecretFor(provider));
+    projectIds.clear();
     return yield* status;
   });
 
@@ -420,24 +435,44 @@ const make = Effect.gen(function* () {
     );
   // run-state without a runId reports the latest finished run, never one queued, running or
   // waiting on a question, so the active run is asked for by id. A thread still preparing has none.
-  const readRunState = Effect.fn("HopliteCloud.readRunState")(function* (
-    apiKey: string,
-    threadId: string,
-  ) {
-    const active = yield* send(
+  // A failed read fails: falling back to the latest finished run would report the wrong run.
+  const readActiveRunId = (apiKey: string, threadId: string) =>
+    send(
       apiKey,
       HttpClientRequest.get(`${threadPath(threadId)}/active-run`),
       ActiveRunResponse,
-    ).pipe(Effect.option);
-    const activeRunId = Option.getOrUndefined(active)?.activeRun?.runId;
-    const state = yield* send(
+    ).pipe(Effect.map(({ activeRun }) => activeRun?.runId));
+  const readRunStateOf = (apiKey: string, threadId: string, activeRunId: string | undefined) =>
+    send(
       apiKey,
       HttpClientRequest.get(`${threadPath(threadId)}/run-state`).pipe(
         HttpClientRequest.setUrlParams(activeRunId === undefined ? {} : { runId: activeRunId }),
       ),
       RunStateResponse,
-    ).pipe(Effect.option);
-    return Option.getOrUndefined(state)?.run ?? null;
+    ).pipe(
+      Effect.map(({ run }) => run ?? null),
+      // Asked without a run id, a thread with no finished run yet has nothing to report.
+      Effect.catchIf(
+        (error) => activeRunId === undefined && error.code === "not_found",
+        () => Effect.succeed(null),
+      ),
+    );
+  const readRunState = Effect.fn("HopliteCloud.readRunState")(function* (
+    apiKey: string,
+    threadId: string,
+  ) {
+    return yield* readRunStateOf(apiKey, threadId, yield* readActiveRunId(apiKey, threadId));
+  });
+  const readThread = (apiKey: string, threadId: string) =>
+    send(apiKey, HttpClientRequest.get(threadPath(threadId)), ThreadResponse).pipe(
+      Effect.map(({ thread }) => thread),
+    );
+  const taskRead = (
+    thread: typeof ThreadRecord.Type,
+    run: typeof RunStateResponse.Type.run,
+  ): HopliteTaskRead => ({
+    task: toTask(thread, run?.assistantMessage?.content ?? null),
+    run: run == null ? null : { id: run.runId, status: run.status },
   });
 
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
@@ -445,16 +480,11 @@ const make = Effect.gen(function* () {
   }: HopliteCloudGetTaskInput) {
     const { id: threadId } = yield* taskOf(taskId);
     const apiKey = yield* requireKey;
-    const { thread } = yield* send(
-      apiKey,
-      HttpClientRequest.get(threadPath(threadId)),
-      ThreadResponse,
+    const [thread, activeRunId] = yield* Effect.all(
+      [readThread(apiKey, threadId), readActiveRunId(apiKey, threadId)],
+      { concurrency: "unbounded" },
     );
-    const run = yield* readRunState(apiKey, threadId);
-    return {
-      task: toTask(thread, run?.assistantMessage?.content ?? null),
-      run: run === null ? null : { id: run.runId, status: run.status },
-    } satisfies HopliteTaskRead;
+    return taskRead(thread, yield* readRunStateOf(apiKey, threadId, activeRunId));
   });
 
   const getTask = (input: HopliteCloudGetTaskInput) =>
@@ -485,14 +515,16 @@ const make = Effect.gen(function* () {
   // Reuses the project that already has the repository, so its setup and secrets apply.
   const projectForRepo = Effect.fn("HopliteCloud.projectForRepo")(function* (
     apiKey: string,
-    repo: string,
+    fullName: string,
   ) {
-    const fullName = normalizeRepo(repo);
     const projects = yield* listProjects(apiKey);
     const existing = projects.find((project) =>
       project.repos?.some((candidate) => normalizeRepo(candidate.repoFullName) === fullName),
     );
-    if (existing !== undefined) return existing.id;
+    if (existing !== undefined) {
+      projectIds.set(fullName, existing.id);
+      return existing.id;
+    }
     const { repositories } = yield* send(
       apiKey,
       HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/source-control/github/repositories`),
@@ -511,6 +543,7 @@ const make = Effect.gen(function* () {
       }),
     );
     const { project } = yield* send(apiKey, request, CreatedProject);
+    projectIds.set(fullName, project.id);
     return project.id;
   });
 
@@ -520,17 +553,39 @@ const make = Effect.gen(function* () {
     const apiKey = yield* requireKey;
     if (input.repo === undefined) return yield* failure("project_required");
     const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
-    const projectId = yield* projectForRepo(apiKey, input.repo);
-    const request = HttpClientRequest.post(`${HOPLITE_API_BASE_URL}/api/threads`).pipe(
-      yield* idempotent(input.clientRequestId),
-      HttpClientRequest.bodyJsonUnsafe({
-        projectId,
-        prompt: input.prompt,
-        ...(input.title === undefined ? {} : { title: input.title }),
-        ...(model === undefined ? {} : { model }),
-      }),
-    );
-    const { thread, run } = yield* send(apiKey, request, CreateThreadResponse);
+    const fullName = normalizeRepo(input.repo);
+    const key = `t3code:${input.clientRequestId ?? (yield* random.uuidV4())}`;
+    const createThread = (projectId: string, retry: boolean) =>
+      send(
+        apiKey,
+        HttpClientRequest.post(`${HOPLITE_API_BASE_URL}/api/threads`).pipe(
+          // Hoplite may have kept the refused attempt under the first key.
+          HttpClientRequest.setHeader("Idempotency-Key", retry ? `${key}:${projectId}` : key),
+          HttpClientRequest.bodyJsonUnsafe({
+            projectId,
+            prompt: input.prompt,
+            ...(input.title === undefined ? {} : { title: input.title }),
+            ...(model === undefined ? {} : { model }),
+          }),
+        ),
+        CreateThreadResponse,
+      );
+    const cached = projectIds.get(fullName);
+    const { thread, run } =
+      cached === undefined
+        ? yield* createThread(yield* projectForRepo(apiKey, fullName), false)
+        : yield* createThread(cached, false).pipe(
+            // The remembered project may be gone; look it up once more.
+            Effect.catchIf(
+              (error) => error.code === "not_found",
+              () => {
+                projectIds.delete(fullName);
+                return projectForRepo(apiKey, fullName).pipe(
+                  Effect.flatMap((projectId) => createThread(projectId, true)),
+                );
+              },
+            ),
+          );
     return { task: toTask(thread, null), runId: run?.id ?? null } satisfies HopliteStartedTask;
   });
 
@@ -558,12 +613,14 @@ const make = Effect.gen(function* () {
     const apiKey = yield* requireKey;
     // Hoplite stops only the run it is told to, so a run that finished meanwhile is never touched.
     const run = yield* readRunState(apiKey, threadId);
-    if (run !== null && ["queued", "running", "waiting"].includes(run.status)) {
-      const request = HttpClientRequest.post(`${threadPath(threadId)}/stop`).pipe(
-        HttpClientRequest.bodyJsonUnsafe({ runId: run.runId }),
-      );
-      yield* send(apiKey, request, StopResponse);
+    // With nothing to stop, the run just read is current; only the thread is still needed.
+    if (run === null || !["queued", "running", "waiting"].includes(run.status)) {
+      return taskRead(yield* readThread(apiKey, threadId), run).task;
     }
+    const request = HttpClientRequest.post(`${threadPath(threadId)}/stop`).pipe(
+      HttpClientRequest.bodyJsonUnsafe({ runId: run.runId }),
+    );
+    yield* send(apiKey, request, StopResponse);
     return yield* getTask({ threadId });
   });
 
