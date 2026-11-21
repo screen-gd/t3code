@@ -33,6 +33,7 @@ it("runs a follow-up queued behind the turn still running", () => {
       NodePath.join(bin, "npx"),
       [
         "#!/bin/sh",
+        'echo "$@" >> "$HOME/.t3-task/args.log"',
         'if [ -f "$HOME/.t3-task/block" ]; then',
         '  echo started > "$HOME/.t3-task/started"',
         '  cat "$HOME/.t3-task/release" > /dev/null',
@@ -53,10 +54,12 @@ it("runs a follow-up queued behind the turn still running", () => {
           'mkfifo "$HOME/.t3-task/started" "$HOME/.t3-task/release"',
           'touch "$HOME/.t3-task/block"',
           'export T3_TASK_PROMPT="first"',
+          'export T3_TASK_MODEL="opus"',
           agentTurnScript({ first: true }),
           // The agent has started and is blocked, so the runner is provably alive.
           'cat "$HOME/.t3-task/started" > /dev/null',
           'export T3_TASK_PROMPT="second"',
+          "unset T3_TASK_MODEL",
           agentTurnScript({ first: false }),
           'rm "$HOME/.t3-task/block"',
           'echo > "$HOME/.t3-task/release"',
@@ -76,6 +79,11 @@ it("runs a follow-up queued behind the turn still running", () => {
       NodeFS.readFileSync(NodePath.join(state, "runs", "2", "out.jsonl"), "utf8"),
       '{"result":"second"}',
     );
+    // The follow-up named no model, so it continues on the first turn's.
+    const args = NodeFS.readFileSync(NodePath.join(state, "args.log"), "utf8").split("\n");
+    assert.include(args[0], "--model opus");
+    assert.include(args[1], " -c --model opus");
+    assert.equal(NodeFS.readFileSync(NodePath.join(state, "runs", "2", "model"), "utf8"), "opus");
   } finally {
     NodeFS.rmSync(home, { recursive: true, force: true });
   }

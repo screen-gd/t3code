@@ -19,6 +19,7 @@ const CURRENT_STATE = `turn=$(cat "${STATE_DIR}/turn" 2>/dev/null || true); stat
 const RUNNER_SCRIPT = `\
 STATE_DIR="${STATE_DIR}"
 cd "$HOME/work" || exit 1
+command -v flock >/dev/null 2>&1 || flock() { :; }
 while :; do
   turn=$(
     exec 9>"$STATE_DIR/lock"
@@ -32,7 +33,9 @@ while :; do
     echo "$next" > "$STATE_DIR/turn"
     mkdir -p "$STATE_DIR/runs/$next"
     mv "$STATE_DIR/queue/$item.prompt" "$STATE_DIR/runs/$next/prompt"
-    mv "$STATE_DIR/queue/$item.model" "$STATE_DIR/runs/$next/model" 2>/dev/null || true
+    if ! mv "$STATE_DIR/queue/$item.model" "$STATE_DIR/runs/$next/model" 2>/dev/null; then
+      cp "$STATE_DIR/runs/$((next - 1))/model" "$STATE_DIR/runs/$next/model" 2>/dev/null || true
+    fi
     echo "$next"
   )
   [ -z "$turn" ] && break
@@ -74,6 +77,7 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
     "T3_RUNNER",
     `mv -f "${STATE_DIR}/runner.sh.tmp" "${STATE_DIR}/runner.sh"`,
     `chmod +x "${STATE_DIR}/runner.sh"`,
+    "command -v flock >/dev/null 2>&1 || flock() { :; }",
     "(",
     `  exec 9>"${STATE_DIR}/lock"`,
     "  flock 9",
