@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  HopliteCloudError,
   type HopliteCloudQuestion,
   type HopliteCloudTask,
   NodeId,
@@ -47,14 +48,35 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
     stops: number;
     questions: ReadonlyArray<HopliteCloudQuestion>;
     answers: Array<string>;
-  } = { run: null, reply: null, runs: [], cards: [], stops: 0, questions: [], answers: [] };
+    /** Every read fails with this while set. */
+    readError: HopliteCloudError | null;
+    connected: boolean;
+    /** Writes of the saved watch list. */
+    saves: number;
+  } = {
+    run: null,
+    reply: null,
+    runs: [],
+    cards: [],
+    stops: 0,
+    questions: [],
+    answers: [],
+    readError: null,
+    connected: true,
+    saves: 0,
+  };
   const dispatched: Array<OrchestrationV2ServerCommand> = [];
   const layer = HopliteTaskWatch.layer.pipe(
     Layer.provide(
       Layer.mock(HopliteCloud.HopliteCloud)({
         startTask: () => Effect.succeed({ task: { ...task, status: "queued" }, runId: "run_1" }),
+        connected: Effect.sync(() => state.connected),
         readTask: () =>
-          Effect.sync(() => ({ task: { ...task, latestReply: state.reply }, run: state.run })),
+          Effect.suspend(() =>
+            state.readError === null
+              ? Effect.succeed({ task: { ...task, latestReply: state.reply }, run: state.run })
+              : Effect.fail(state.readError),
+          ),
         sendMessage: () => Effect.succeed({ runId: null }),
         stopTask: () => Effect.sync(() => (state.stops++, task)),
         listQuestions: () => Effect.sync(() => state.questions),
@@ -95,7 +117,7 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
         ServerSecretStore.ServerSecretStore,
         ServerSecretStore.ServerSecretStore.of({
           get: (name) => Effect.sync(() => Option.fromNullishOr(stored.get(name))),
-          set: (name, value) => Effect.sync(() => void stored.set(name, value)),
+          set: (name, value) => Effect.sync(() => (state.saves++, void stored.set(name, value))),
           create: (name, value) => Effect.sync(() => void stored.set(name, value)),
           getOrCreateRandom: () => Effect.die("unused"),
           remove: (name) => Effect.sync(() => void stored.delete(name)),
@@ -123,6 +145,22 @@ it.effect("an agent's task wakes its thread once, when the run it started settle
     harness.state.run = { id: "run_1", status: "running" };
     yield* watch.sweep;
     assert.deepStrictEqual(wakes(harness.dispatched), []);
+
+    // A sweep that changes nothing, or only counts a failed read, saves nothing.
+    const saves = harness.state.saves;
+    yield* watch.sweep;
+    harness.state.readError = new HopliteCloudError({ code: "unavailable", message: "Down." });
+    yield* watch.sweep;
+    assert.strictEqual(harness.state.saves, saves);
+
+    // Rate limiting never counts toward giving up on the task.
+    harness.state.readError = new HopliteCloudError({
+      code: "rate_limited",
+      message: "Slow down.",
+    });
+    for (let sweep = 0; sweep < 10; sweep++) yield* watch.sweep;
+    assert.deepStrictEqual(wakes(harness.dispatched), []);
+    harness.state.readError = null;
 
     harness.state.run = { id: "run_1", status: "completed" };
     harness.state.reply = "Tests pass.";
@@ -187,6 +225,12 @@ it.effect("a card cancelled in T3 stops its Hoplite task", () => {
   ];
   return Effect.gen(function* () {
     const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    // Without a stored key there is no stop to send, so the cards are not scanned.
+    harness.state.connected = false;
+    yield* watch.sweep;
+    assert.strictEqual(harness.state.stops, 0);
+
+    harness.state.connected = true;
     yield* watch.sweep;
     assert.strictEqual(harness.state.stops, 1);
     const [complete] = harness.dispatched;

@@ -236,6 +236,12 @@ const make = Effect.gen(function* () {
   );
   const sameTask = (a: HopliteTaskWatchEntry, b: HopliteTaskWatchEntry) =>
     a.callerThreadId === b.callerThreadId && a.hopliteThreadId === b.hopliteThreadId;
+  // The failure count is not worth a write; after a restart it starts again from zero.
+  const sameButFailures = (a: HopliteTaskWatchEntry, b: HopliteTaskWatchEntry) => {
+    const fields = new Set([...Object.keys(a), ...Object.keys(b)] as Array<keyof typeof a>);
+    fields.delete("failures");
+    return [...fields].every((field) => a[field] === b[field]);
+  };
 
   /** Replaces any watch on the same task by the same caller; false when full. */
   const add = (watch: HopliteTaskWatchEntry) =>
@@ -245,9 +251,11 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.tap(persist));
   // Only the exact entry a sweep read is replaced, so a newer watch from a message wins.
   const replace = (from: HopliteTaskWatchEntry, to: HopliteTaskWatchEntry | null) =>
-    Ref.update(watches, (current) =>
-      current.flatMap((entry) => (entry !== from ? [entry] : to === null ? [] : [to])),
-    ).pipe(Effect.andThen(persist));
+    Ref.modify(watches, (current) => {
+      if (!current.includes(from)) return [false, current];
+      const next = current.flatMap((entry) => (entry !== from ? [entry] : to === null ? [] : [to]));
+      return [to === null || !sameButFailures(from, to), next];
+    }).pipe(Effect.flatMap((changed) => (changed ? persist : Effect.void)));
 
   const resultFor = (task: HopliteCloudTask, watched: boolean): HopliteCloudTaskResult =>
     watched ? { ...task, next: HOPLITE_TASK_WAKES_NEXT } : task;
@@ -485,6 +493,8 @@ const make = Effect.gen(function* () {
   const check = Effect.fnUntraced(function* (watch: HopliteTaskWatchEntry) {
     const read = yield* Effect.result(hoplite.readTask({ threadId: watch.hopliteThreadId }));
     if (read._tag === "Failure") {
+      // Rate limiting says nothing about the task; the next sweep tries again.
+      if (read.failure.code === "rate_limited") return;
       const failures = watch.failures + 1;
       if (!GIVE_UP_CODES.includes(read.failure.code) && failures < READ_FAILURE_LIMIT) {
         return yield* replace(watch, { ...watch, failures });
@@ -576,7 +586,9 @@ const make = Effect.gen(function* () {
 
   const sweep = Ref.get(watches).pipe(
     Effect.flatMap((current) => Effect.forEach(current, check, { concurrency: 4, discard: true })),
-    Effect.andThen(sweepCards),
+    // Without a stored key no stop can be sent, so the cards are left for when one is.
+    Effect.andThen(hoplite.connected),
+    Effect.flatMap((connected) => (connected ? sweepCards : Effect.void)),
     Effect.catchCause((cause) => Effect.logWarning("hoplite-cloud.watch-sweep-failed", { cause })),
     Effect.withSpan("HopliteTaskWatch.sweep"),
   );
