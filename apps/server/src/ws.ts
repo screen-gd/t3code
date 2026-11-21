@@ -266,6 +266,7 @@ import {
   reloadOnActivity,
   resolveHopliteTask,
   watchTaskChat,
+  withRunning,
 } from "./hopliteCloud/HopliteTaskChat.ts";
 import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as TextGenerators from "./textGeneration/TextGenerators.ts";
@@ -2785,9 +2786,12 @@ export const layerWsRpc = (
             {
               readTask: readDelegatedTask,
               watchThreadChat: (hopliteThreadId) =>
-                reloadOnActivity(
-                  hopliteCloud.watchThreadChat(hopliteThreadId),
-                  hopliteTaskWatch.threadActivity(hopliteThreadId),
+                withRunning(
+                  reloadOnActivity(
+                    hopliteCloud.watchThreadChat(hopliteThreadId),
+                    hopliteTaskWatch.threadActivity(hopliteThreadId),
+                  ),
+                  hopliteTaskWatch.watching(hopliteThreadId),
                 ),
             },
             input,

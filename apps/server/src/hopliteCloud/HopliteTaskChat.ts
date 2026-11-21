@@ -247,6 +247,17 @@ export const reloadOnActivity = <E>(
     Stream.map(activity, () => false),
   ).pipe(Stream.switchMap((first) => (first ? open : replayed(open))));
 
+/** Marks each `live` event with whether the task's run is still going, read as it passes. */
+export const withRunning = <E>(
+  chat: Stream.Stream<CloudTaskChatEvent, E>,
+  running: Effect.Effect<boolean>,
+): Stream.Stream<CloudTaskChatEvent, E> =>
+  Stream.mapEffect(chat, (event) =>
+    event._tag === "live"
+      ? Effect.map(running, (value): CloudTaskChatEvent => ({ _tag: "live", running: value }))
+      : Effect.succeed(event),
+  );
+
 type ReadTask<E> = (
   input: HopliteCloudWatchTaskChatInput,
 ) => Effect.Effect<OrchestrationV2Subagent | undefined, E>;
