@@ -147,8 +147,8 @@ const socketStdio = Effect.fn("HopliteTaskChat.socketStdio")(function* (socket: 
 
 /**
  * Streams a Hoplite thread's chat over ACP v1: `session/load` replays the latest
- * messages, then the session keeps receiving activity from other clients, such as
- * the runs T3 starts through the REST API. v2 does not forward that activity yet.
+ * messages. Runs T3 starts through the REST API never reach the open session, so
+ * `reloadOnActivity` loads it again after each one.
  */
 export const watchHopliteThreadChat = (input: {
   readonly socket: Socket.Socket;
