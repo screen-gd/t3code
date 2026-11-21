@@ -378,8 +378,10 @@ const make = Effect.gen(function* () {
     // A message queued behind the active run gets no run id; the run before it is the baseline.
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const { runId } = yield* hoplite.sendMessage(input);
-    yield* touched(input.threadId);
-    if (callerThreadId === undefined) return before.task;
+    if (callerThreadId === undefined) {
+      yield* touched(input.threadId);
+      return before.task;
+    }
     const taskId = yield* recordCard({
       callerThreadId,
       hopliteThreadId: input.threadId,
@@ -397,6 +399,8 @@ const make = Effect.gen(function* () {
       failures: 0,
       ...(taskId === undefined ? {} : { taskId }),
     });
+    // After the watch is saved, so a chat reloading on this reads the new run as going.
+    yield* touched(input.threadId);
     return resultFor(before.task, watched);
   });
 
@@ -406,8 +410,10 @@ const make = Effect.gen(function* () {
   ) {
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const answered = yield* hoplite.answerQuestion(input);
-    yield* touched(input.threadId);
-    if (callerThreadId === undefined) return before.task;
+    if (callerThreadId === undefined) {
+      yield* touched(input.threadId);
+      return before.task;
+    }
     const runId = answered.runId;
     const taskId = yield* recordCard({
       callerThreadId,
@@ -428,6 +434,7 @@ const make = Effect.gen(function* () {
       answeredQuestionId: input.questionId,
       ...(taskId === undefined ? {} : { taskId }),
     });
+    yield* touched(input.threadId);
     return resultFor(before.task, watched);
   });
 
@@ -484,12 +491,13 @@ const make = Effect.gen(function* () {
     message: { readonly text: string; readonly notification: OrchestrationV2Notification },
     status: CardStatus,
   ) =>
-    touched(watch.hopliteThreadId).pipe(
-      Effect.andThen(
-        watch.taskId === undefined
-          ? wake(watch, key, message)
-          : completeCard(watch.callerThreadId, watch.taskId, status, message.text, "ran-out"),
-      ),
+    (watch.taskId === undefined
+      ? wake(watch, key, message)
+      : completeCard(watch.callerThreadId, watch.taskId, status, message.text, "ran-out")
+    ).pipe(
+      // The watch goes before the chat is told, so a chat reloading on this reads the run as over.
+      Effect.andThen(replace(watch, null)),
+      Effect.andThen(touched(watch.hopliteThreadId)),
     );
 
   const check = Effect.fnUntraced(function* (watch: HopliteTaskWatchEntry) {
@@ -501,7 +509,7 @@ const make = Effect.gen(function* () {
       if (!GIVE_UP_CODES.includes(read.failure.code) && failures < READ_FAILURE_LIMIT) {
         return yield* replace(watch, { ...watch, failures });
       }
-      yield* settle(
+      return yield* settle(
         watch,
         `unread:${watch.runId ?? watch.afterRunId ?? "none"}`,
         {
@@ -514,7 +522,6 @@ const make = Effect.gen(function* () {
         },
         "failed",
       );
-      return yield* replace(watch, null);
     }
     const step = stepWatch(watch, read.success.run);
     if (step.type === "wait") {
@@ -545,7 +552,6 @@ const make = Effect.gen(function* () {
       settledWake(read.success.task, status, questions),
       cardStatus(status),
     );
-    yield* replace(watch, null);
   });
 
   /**
