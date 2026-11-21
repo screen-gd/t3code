@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 
 import * as Electron from "electron";
@@ -24,6 +25,11 @@ export class DesktopTray extends Context.Service<
 >()("@t3tools/desktop/window/DesktopTray") {}
 
 const { logWarning } = makeComponentLogger("desktop-tray");
+
+class DesktopTrayCreateError extends Schema.TaggedError<DesktopTrayCreateError>()(
+  "DesktopTrayCreateError",
+  { cause: Schema.Defect() },
+) {}
 
 /** @public */
 export const make = Effect.gen(function* () {
@@ -61,15 +67,20 @@ export const make = Effect.gen(function* () {
     const iconPaths = yield* assets.iconPaths;
     // Tray icons need a real image; a missing or undecodable asset leaves the
     // feature off so window close keeps its normal quit behavior.
-    const created = yield* Effect.try(() => {
-      if (environment.platform === "win32") {
-        const icoPath = Option.getOrNull(iconPaths.ico);
-        return icoPath === null ? null : new Electron.Tray(icoPath);
-      }
-      const pngPath = Option.getOrNull(iconPaths.png);
-      if (pngPath === null) return null;
-      const image = Electron.nativeImage.createFromPath(pngPath).resize({ width: 32, height: 32 });
-      return image.isEmpty() ? null : new Electron.Tray(image);
+    const created = yield* Effect.try({
+      try: () => {
+        if (environment.platform === "win32") {
+          const icoPath = Option.getOrNull(iconPaths.ico);
+          return icoPath === null ? null : new Electron.Tray(icoPath);
+        }
+        const pngPath = Option.getOrNull(iconPaths.png);
+        if (pngPath === null) return null;
+        const image = Electron.nativeImage
+          .createFromPath(pngPath)
+          .resize({ width: 32, height: 32 });
+        return image.isEmpty() ? null : new Electron.Tray(image);
+      },
+      catch: (cause) => new DesktopTrayCreateError({ cause }),
     }).pipe(
       Effect.catch((cause) =>
         logWarning("failed to create the system tray icon", { cause }).pipe(Effect.as(undefined)),

@@ -8,8 +8,10 @@ import * as Path from "effect/Path";
 import * as Predicate from "effect/Predicate";
 import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 
 import * as ServerConfig from "../config.ts";
+import { makeSecretLock } from "./secretFileAcl.ts";
 
 const secretStoreErrorContext = {
   resource: Schema.String,
@@ -168,7 +170,30 @@ export const make = Effect.gen(function* () {
     ),
   );
 
+  const lock = yield* makeSecretLock;
+  // Locking the directory covers new files; existing ones are locked too, keeping their contents.
+  yield* Effect.gen(function* () {
+    yield* lock(serverConfig.secretsDir, "directory");
+    const names = yield* fileSystem.readDirectory(serverConfig.secretsDir);
+    yield* Effect.forEach(
+      names.filter((name) => name.endsWith(".bin")),
+      (name) => lock(path.join(serverConfig.secretsDir, name), "file"),
+      { discard: true },
+    );
+  }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new SecretStoreSecureError({
+          resource: `secrets directory ${serverConfig.secretsDir}`,
+          cause,
+        }),
+    ),
+  );
+
   const resolveSecretPath = (name: string) => path.join(serverConfig.secretsDir, `${name}.bin`);
+  const emptySecretRepair = yield* Semaphore.make(1);
+  const isMissingOrNonEmpty = (secret: Option.Option<Uint8Array>) =>
+    Option.isNone(secret) || secret.value.byteLength > 0;
 
   const get: ServerSecretStore["Service"]["get"] = (name) =>
     fileSystem.readFile(resolveSecretPath(name)).pipe(
@@ -203,6 +228,7 @@ export const make = Effect.gen(function* () {
           yield* fileSystem.chmod(tempPath, 0o600);
           yield* fileSystem.rename(tempPath, secretPath);
           yield* fileSystem.chmod(secretPath, 0o600);
+          yield* lock(secretPath, "file");
         }).pipe(
           Effect.catch((cause) =>
             fileSystem.remove(tempPath).pipe(
@@ -247,6 +273,7 @@ export const make = Effect.gen(function* () {
           );
           yield* fileSystem.chmod(tempPath, 0o600);
           yield* fileSystem.link(tempPath, secretPath);
+          yield* lock(secretPath, "file");
         }).pipe(
           Effect.ensuring(fileSystem.remove(tempPath).pipe(Effect.ignore)),
           Effect.mapError(
@@ -263,6 +290,19 @@ export const make = Effect.gen(function* () {
 
   const getOrCreateRandom: ServerSecretStore["Service"]["getOrCreateRandom"] = (name, bytes) =>
     get(name).pipe(
+      // Older builds could persist a 0-byte secret, which is never a usable key. Re-read under
+      // the permit, and keep it until an interrupted removal settles, so a caller that saw the
+      // empty file cannot remove a key another caller created.
+      Effect.filterOrElse(isMissingOrNonEmpty, () =>
+        emptySecretRepair.withPermits(1)(
+          get(name).pipe(
+            Effect.filterOrElse(isMissingOrNonEmpty, () =>
+              remove(name).pipe(Effect.as(Option.none<Uint8Array>())),
+            ),
+            Effect.uninterruptible,
+          ),
+        ),
+      ),
       Effect.flatMap(
         Option.match({
           onSome: Effect.succeed,
