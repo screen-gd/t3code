@@ -51,7 +51,7 @@ import {
   BUSY_EXIT,
   agentTurnScript,
   parseTurn,
-  READ_TURN_SCRIPT,
+  readTurnScript,
   redact,
   startedRunId,
   STOP_SCRIPT,
@@ -210,7 +210,7 @@ export class HopliteCloud extends Context.Service<
       input: HopliteCloudGetTaskInput,
     ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
     readonly readTask: (
-      input: HopliteCloudGetTaskInput,
+      input: HopliteCloudGetTaskInput & { readonly runId?: string },
     ) => Effect.Effect<HopliteTaskRead, HopliteCloudError>;
     /** Returns the run the message started, or null when it waits behind the active one. */
     readonly sendMessage: (
@@ -466,9 +466,18 @@ const make = Effect.gen(function* () {
   const sessionTask = Effect.fn("HopliteCloud.sessionTask")(function* (
     provider: SessionProvider,
     id: string,
+    runId?: string,
   ) {
+    const turnNumber = runId === undefined ? undefined : /^turn-([1-9]\d{0,8})$/.exec(runId)?.[1];
+    if (runId !== undefined && turnNumber === undefined)
+      return yield* failure("not_found", provider);
     const apiKey = yield* keyFor(provider);
-    const result = yield* sessionOf(provider).exec(apiKey, id, READ_TURN_SCRIPT, {});
+    const result = yield* sessionOf(provider).exec(
+      apiKey,
+      id,
+      readTurnScript(turnNumber === undefined ? undefined : Number(turnNumber)),
+      {},
+    );
     // Redacted before parsing, so neither the reply's cut nor its link can split a key.
     const turn = parseTurn({
       ...result,
@@ -610,9 +619,10 @@ const make = Effect.gen(function* () {
 
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId: taskId,
-  }: HopliteCloudGetTaskInput) {
+    runId,
+  }: HopliteCloudGetTaskInput & { readonly runId?: string }) {
     const { provider, id: threadId } = yield* taskOf(taskId);
-    if (provider !== "hoplite") return yield* sessionTask(provider, threadId);
+    if (provider !== "hoplite") return yield* sessionTask(provider, threadId, runId);
     const apiKey = yield* requireKey;
     const { thread } = yield* send(
       apiKey,

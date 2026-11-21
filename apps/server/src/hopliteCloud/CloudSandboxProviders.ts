@@ -298,7 +298,7 @@ const makeAgent37 = ({ send }: Deps): SessionAdapter => ({
       "agent37",
       apiKey,
       HttpClientRequest.post(`${AGENT37_API_BASE_URL}/instances`).pipe(
-        // Agent37 bills an awake instance until it sleeps, and only sleeps when asked to.
+        // Exec polls reset Agent37's idle timer; background CPU work alone does not.
         HttpClientRequest.bodyJsonUnsafe({
           template: "agent37-claude-code",
           auto_sleep: true,

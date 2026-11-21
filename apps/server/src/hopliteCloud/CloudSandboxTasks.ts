@@ -8,6 +8,8 @@ const MAX_REPLY_LENGTH = 4_000;
 /** agentTurnScript exits with this while the previous turn still runs. */
 export const BUSY_EXIT = 75;
 const ERR_MARKER = "---t3-task-err---";
+// Older sandboxes keep their last turn directly in STATE_DIR.
+const CURRENT_STATE = `turn=$(cat "${STATE_DIR}/turn" 2>/dev/null || true); state="${STATE_DIR}/runs/$turn"; [ -d "$state" ] || state="${STATE_DIR}"`;
 
 /**
  * What runs inside the sandbox for a turn. The prompt, repo and keys arrive as
@@ -18,8 +20,8 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
   [
     "set -e",
     `mkdir -p "${STATE_DIR}"`,
-    // One turn at a time: they share the state files.
-    `if [ ! -f "${STATE_DIR}/exit" ] && kill -0 "$(cat "${STATE_DIR}/pid" 2>/dev/null)" 2>/dev/null; then exit ${BUSY_EXIT}; fi`,
+    CURRENT_STATE,
+    `if [ ! -f "$state/exit" ] && kill -0 "$(cat "$state/pid" 2>/dev/null)" 2>/dev/null; then exit ${BUSY_EXIT}; fi`,
     `git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'`,
     ...(input.first
       ? [
@@ -28,11 +30,13 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
       : []),
     'mkdir -p "$HOME/work" && cd "$HOME/work"',
     // The turn counts only once its agent starts, so a failed clone leaves no turn waiting.
-    `rm -f "${STATE_DIR}/exit"`,
-    `echo $(( $(cat "${STATE_DIR}/turn" 2>/dev/null || echo 0) + 1 )) > "${STATE_DIR}/turn"`,
-    `setsid nohup bash -c 'npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" ${input.first ? "" : "-c "}--dangerously-skip-permissions --output-format json > "${STATE_DIR}/out.json" 2> "${STATE_DIR}/err.log"; echo $? > "${STATE_DIR}/exit"' > /dev/null 2>&1 &`,
-    `echo $! > "${STATE_DIR}/pid"`,
-    `echo "turn=$(cat "${STATE_DIR}/turn")"`,
+    "turn=$(( ${turn:-0} + 1 ))",
+    `export T3_TASK_STATE="${STATE_DIR}/runs/$turn"`,
+    'mkdir -p "$T3_TASK_STATE"',
+    `echo "$turn" > "${STATE_DIR}/turn"`,
+    `setsid nohup bash -c 'npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" ${input.first ? "" : "-c "}--dangerously-skip-permissions --output-format json > "$T3_TASK_STATE/out.json" 2> "$T3_TASK_STATE/err.log"; echo $? > "$T3_TASK_STATE/exit"' > /dev/null 2>&1 &`,
+    'echo $! > "$T3_TASK_STATE/pid"',
+    'echo "turn=$turn"',
   ].join("\n");
 
 /** The run id of the turn agentTurnScript started, from the line it ends with. */
@@ -55,17 +59,24 @@ export const agentTurnEnv = (
 });
 
 // Whole lines from the start of the reply and the end of the log, so no key is cut in two.
-export const READ_TURN_SCRIPT = [
-  `echo "turn=$(cat "${STATE_DIR}/turn" 2>/dev/null)"`,
-  `echo "exit=$(cat "${STATE_DIR}/exit" 2>/dev/null)"`,
-  'echo "---"',
-  `head -c 200000 "${STATE_DIR}/out.json" 2>/dev/null || true`,
-  `echo; echo "${ERR_MARKER}"`,
-  `tail -n 40 "${STATE_DIR}/err.log" 2>/dev/null || true`,
-].join("\n");
+export const readTurnScript = (turn?: number) =>
+  [
+    ...(turn === undefined
+      ? [CURRENT_STATE]
+      : [
+          `turn=${turn}; state="${STATE_DIR}/runs/$turn"`,
+          `if [ ! -d "$state" ] && [ "$(cat "${STATE_DIR}/turn" 2>/dev/null)" = "$turn" ]; then state="${STATE_DIR}"; fi`,
+        ]),
+    'echo "turn=$turn"',
+    'echo "exit=$(cat "$state/exit" 2>/dev/null)"',
+    'echo "---"',
+    'head -c 200000 "$state/out.json" 2>/dev/null || true',
+    `echo; echo "${ERR_MARKER}"`,
+    'tail -n 40 "$state/err.log" 2>/dev/null || true',
+  ].join("\n");
 
 // setsid makes the agent's pid its process group, so this stops the agent and its children.
-export const STOP_SCRIPT = `kill -- -$(cat "${STATE_DIR}/pid" 2>/dev/null) 2>/dev/null || true; [ -f "${STATE_DIR}/exit" ] || echo 130 > "${STATE_DIR}/exit"`;
+export const STOP_SCRIPT = `${CURRENT_STATE}; kill -- -$(cat "$state/pid" 2>/dev/null) 2>/dev/null || true; [ -f "$state/exit" ] || echo 130 > "$state/exit"`;
 
 const PULL_REQUEST = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
 
@@ -85,7 +96,7 @@ export interface TurnState {
 }
 
 /**
- * Reads READ_TURN_SCRIPT's output, which must already be redacted: no exit code yet
+ * Reads readTurnScript's output, which must already be redacted: no exit code yet
  * means the agent still runs.
  */
 export const parseTurn = (result: CommandResult): TurnState => {

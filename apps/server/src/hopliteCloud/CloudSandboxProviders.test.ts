@@ -151,6 +151,15 @@ it.effect.each([
 
       const started = yield* cloud.startTask({ provider, prompt: "Fix login", repo: "acme/web" });
       assert.equal(started.task.threadId, `${provider}:${sandboxId}`);
+      if (provider === "agent37") {
+        const created = harness.sent.find(
+          (request) => request.method === "POST" && request.url.endsWith("/instances"),
+        );
+        assert.deepInclude(JSON.parse(created!.body), {
+          auto_sleep: true,
+          idle_timeout_seconds: 3600,
+        });
+      }
       const turn = harness.sent.find((request) =>
         request.body.includes("--dangerously-skip-permissions"),
       );
@@ -167,6 +176,8 @@ it.effect.each([
           "Opened https://github.com/acme/web/pull/3 with [redacted] and [redacted], not https://github.com/[redacted]/web/pull/4",
       });
       assert.deepStrictEqual(read.run, { id: "turn-1", status: "completed" });
+      yield* cloud.readTask({ threadId: `${provider}:${sandboxId}`, runId: "turn-1" });
+      assert.include(harness.sent.at(-1)!.body, "runs/$turn");
     }).pipe(Effect.provide(harness.layer));
   },
 );
@@ -194,6 +205,12 @@ it.effect("refuses sandbox ids outside each provider's format before sending a k
       yield* cloud.connect(provider, KEYS[provider]);
     }
     const before = harness.sent.length;
+    for (const runId of ["../x", "turn-1;echo bad", "turn-0"]) {
+      assert.equal(
+        yield* errorCode(cloud.readTask({ threadId: "daytona:dsb-1", runId })),
+        "not_found",
+      );
+    }
     for (const threadId of ["e2b:../x", "e2b:ISB1", "daytona:-x", "daytona:a/b", "agent37:.."]) {
       assert.equal(yield* errorCode(cloud.readTask({ threadId })), "not_found");
       assert.equal(
