@@ -253,18 +253,19 @@ function AgentCredentialRow(props: {
       }
       control={
         <span className="flex items-center gap-2">
-          <Input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={credential}
-            onChange={(event) => setCredential(event.target.value)}
-            placeholder={
-              props.agent === "codex" ? gt("OpenAI API key") : gt("API key or setup-token")
-            }
-            disabled={pending}
-            className="w-44"
-          />
+          <span className="w-44">
+            <Input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={credential}
+              onChange={(event) => setCredential(event.target.value)}
+              placeholder={
+                props.agent === "codex" ? gt("OpenAI API key") : gt("API key or setup-token")
+              }
+              disabled={pending}
+            />
+          </span>
           <Button
             size="sm"
             variant="outline"
