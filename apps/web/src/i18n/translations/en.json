@@ -12505,5 +12505,6 @@
   "1deb32271be14520": "Paste an Anthropic API key, or run `claude setup-token` and paste its token to use a Claude plan.",
   "e033591b273697aa": "API key or setup-token",
   "0a8bf9e56819c4f4": "Codex for sandboxes",
-  "a22795377698ca95": "Paste an OpenAI API key."
+  "a22795377698ca95": "Paste an OpenAI API key.",
+  "a251b7e1a2f3a189": "OpenAI API key"
 }

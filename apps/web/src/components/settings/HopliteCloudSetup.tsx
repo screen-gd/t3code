@@ -259,7 +259,9 @@ function AgentCredentialRow(props: {
             spellCheck={false}
             value={credential}
             onChange={(event) => setCredential(event.target.value)}
-            placeholder={gt("API key or setup-token")}
+            placeholder={
+              props.agent === "codex" ? gt("OpenAI API key") : gt("API key or setup-token")
+            }
             disabled={pending}
             className="w-44"
           />

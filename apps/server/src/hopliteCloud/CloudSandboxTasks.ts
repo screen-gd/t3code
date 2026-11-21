@@ -261,6 +261,26 @@ const codexToolStatus = (item: Record<string, unknown>, completed: boolean) => {
   return "completed" as const;
 };
 
+// A failing Codex turn emits its error twice (an error line, then turn.failed), so
+// a repeat of the last assistant text is skipped; true iff an entry was added.
+const pushTurnError = (
+  entries: Array<CloudTaskChatEntry>,
+  turn: number,
+  index: number,
+  text: string,
+) => {
+  const last = entries.at(-1);
+  if (
+    last?._tag === "message" &&
+    last.role === "assistant" &&
+    last.id.startsWith(`turn-${turn}-`) &&
+    last.text === text
+  )
+    return false;
+  entries.push({ _tag: "message", id: `turn-${turn}-${index}`, role: "assistant", text });
+  return true;
+};
+
 /**
  * The chat readChatScript prints, as entries: each turn's prompt, assistant text and
  * tool calls. A tool stays in_progress until its tool_result, or failed when the turn
@@ -359,12 +379,7 @@ export const parseChat = (output: string): Array<CloudTaskChatEntry> => {
             }
           } else if (item.type === "error") {
             if (typeof item.message === "string" && item.message !== "") {
-              entries.push({
-                _tag: "message",
-                id: `turn-${turn.turn}-${(index += 1)}`,
-                role: "assistant",
-                text: item.message,
-              });
+              if (pushTurnError(entries, turn.turn, index + 1, item.message)) index += 1;
             }
           } else if (
             item.type === "command_execution" ||
@@ -397,12 +412,7 @@ export const parseChat = (output: string): Array<CloudTaskChatEntry> => {
                 ? event.message
                 : null;
           if (message !== null && message !== "") {
-            entries.push({
-              _tag: "message",
-              id: `turn-${turn.turn}-${(index += 1)}`,
-              role: "assistant",
-              text: message,
-            });
+            if (pushTurnError(entries, turn.turn, index + 1, message)) index += 1;
           }
         }
       }

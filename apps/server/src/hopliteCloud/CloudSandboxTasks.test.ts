@@ -404,7 +404,11 @@ it("parses a chat's prompts, replies and tool states", () => {
     chatTurn(
       3,
       "Fails",
-      [JSON.stringify({ type: "turn.failed", error: { message: "ran out of turns" } })],
+      [
+        // A failing Codex turn prints the same message as an error line and turn.failed.
+        JSON.stringify({ type: "error", message: "ran out of turns" }),
+        JSON.stringify({ type: "turn.failed", error: { message: "ran out of turns" } }),
+      ],
       "1",
     ),
     "---t3-chat-running---",
