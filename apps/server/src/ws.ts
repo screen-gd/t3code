@@ -262,12 +262,7 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
 import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
-import {
-  reloadOnActivity,
-  resolveHopliteTask,
-  watchTaskChat,
-  withRunning,
-} from "./hopliteCloud/HopliteTaskChat.ts";
+import { resolveHopliteTask, watchTaskChat, withRunning } from "./hopliteCloud/HopliteTaskChat.ts";
 import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as TextGenerators from "./textGeneration/TextGenerators.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -2787,8 +2782,8 @@ export const layerWsRpc = (
               readTask: readDelegatedTask,
               watchThreadChat: (hopliteThreadId) =>
                 withRunning(
-                  reloadOnActivity(
-                    hopliteCloud.watchThreadChat(hopliteThreadId),
+                  hopliteCloud.watchThreadChat(
+                    hopliteThreadId,
                     hopliteTaskWatch.threadActivity(hopliteThreadId),
                   ),
                   hopliteTaskWatch.watching(hopliteThreadId),

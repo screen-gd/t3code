@@ -148,40 +148,63 @@ const socketStdio = Effect.fn("HopliteTaskChat.socketStdio")(function* (socket: 
 /**
  * Streams a Hoplite thread's chat over ACP v1: `session/load` replays the latest
  * messages. Runs T3 starts through the REST API never reach the open session, so
- * `reloadOnActivity` loads it again after each one.
+ * the session is loaded again on the same connection after each `activity`; the
+ * client never sees a half-loaded chat because a reload arrives as one `replace`.
  */
 export const watchHopliteThreadChat = (input: {
   readonly socket: Socket.Socket;
   readonly hopliteThreadId: string;
+  readonly activity: Stream.Stream<void>;
 }): Stream.Stream<CloudTaskChatEvent, AcpError.AcpError> =>
   watchAcpThreadChat({
     stdio: socketStdio(input.socket),
     hopliteThreadId: input.hopliteThreadId,
+    activity: input.activity,
   });
 
 export const watchAcpThreadChat = (input: {
   readonly stdio: Effect.Effect<AcpProtocol.AcpStdio, never, Scope.Scope>;
   readonly hopliteThreadId: string;
+  readonly activity: Stream.Stream<void>;
 }): Stream.Stream<CloudTaskChatEvent, AcpError.AcpError> =>
   Stream.callback<CloudTaskChatEvent, AcpError.AcpError>((queue) =>
     Effect.gen(function* () {
       const acp = yield* AcpClient.make(yield* input.stdio);
-      const reduce = makeChatReducer();
-      yield* acp.handleSessionUpdate((notification) =>
-        notification.sessionId === input.hopliteThreadId
-          ? Queue.offerAll(queue, reduce(notification.update)).pipe(Effect.asVoid)
-          : Effect.void,
-      );
+      let reduce = makeChatReducer();
+      // While a reload is in flight the replay folds here instead of reaching the
+      // client, and leaves as one `replace` once `session/load` resolves.
+      let replay: ReadonlyArray<CloudTaskChatEntry> | null = null;
+      yield* acp.handleSessionUpdate((notification) => {
+        if (notification.sessionId !== input.hopliteThreadId) return Effect.void;
+        const events = reduce(notification.update);
+        const buffer = replay;
+        if (buffer === null) return Queue.offerAll(queue, events).pipe(Effect.asVoid);
+        replay = events.reduce(foldReplay, buffer);
+        return Effect.void;
+      });
       yield* acp.agent.initialize({ protocolVersion: 1, clientCapabilities: {} });
       // The key on the socket identifies the caller, but Hoplite still requires protocol login.
       yield* acp.agent.authenticate({ methodId: "hoplite-api-key" });
-      yield* acp.agent.loadSession({
+      const session = {
         sessionId: input.hopliteThreadId,
         cwd: "/",
         mcpServers: [],
         _meta: { hoplite: { replayLimit: REPLAY_LIMIT } },
-      });
+      };
+      yield* acp.agent.loadSession(session);
       yield* Queue.offer(queue, { _tag: "live" });
+      yield* input.activity.pipe(
+        Stream.runForEach(() =>
+          Effect.gen(function* () {
+            reduce = makeChatReducer();
+            replay = [];
+            yield* acp.agent.loadSession(session);
+            const entries = replay ?? [];
+            replay = null;
+            yield* Queue.offerAll(queue, [{ _tag: "replace", entries }, { _tag: "live" }]);
+          }),
+        ),
+      );
     }).pipe(
       Effect.catch((error) => Queue.fail(queue, error)),
       Effect.andThen(Effect.never),
@@ -214,38 +237,6 @@ const foldReplay = (
       return entries;
   }
 };
-
-/** Holds a connection's replay back until it ends, then sends it as one `replace`. */
-const replayed = <E>(
-  chat: Stream.Stream<CloudTaskChatEvent, E>,
-): Stream.Stream<CloudTaskChatEvent, E> =>
-  chat.pipe(
-    Stream.mapAccum(
-      () => ({ replaying: true, entries: [] as ReadonlyArray<CloudTaskChatEntry> }),
-      (state, event) => {
-        if (!state.replaying) return [state, [event]] as const;
-        if (event._tag !== "live") {
-          return [{ replaying: true, entries: foldReplay(state.entries, event) }, []] as const;
-        }
-        const replace: CloudTaskChatEvent = { _tag: "replace", entries: state.entries };
-        return [{ replaying: false, entries: [] }, [replace, event]] as const;
-      },
-    ),
-  );
-
-/**
- * Hoplite does not forward runs started over its REST API to an open ACP session,
- * so each `activity` (a message sent, a run settled) replays the chat on a new
- * connection, without the client ever showing a half-loaded chat.
- */
-export const reloadOnActivity = <E>(
-  open: Stream.Stream<CloudTaskChatEvent, E>,
-  activity: Stream.Stream<void>,
-): Stream.Stream<CloudTaskChatEvent, E> =>
-  Stream.concat(
-    Stream.make(true),
-    Stream.map(activity, () => false),
-  ).pipe(Stream.switchMap((first) => (first ? open : replayed(open))));
 
 /** Marks each `live` event with whether the task's run is still going, read as it passes. */
 export const withRunning = <E>(

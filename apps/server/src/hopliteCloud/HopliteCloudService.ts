@@ -198,9 +198,13 @@ export class HopliteCloud extends Context.Service<
     readonly answerQuestion: (
       input: HopliteCloudAnswerInput,
     ) => Effect.Effect<{ readonly runId: string | null }, HopliteCloudError>;
-    /** A Hoplite thread's chat: its recent history, then live activity until unsubscribed. */
+    /**
+     * A Hoplite thread's chat: its recent history, then live activity until unsubscribed.
+     * Each `activity` reloads the session on the same connection, arriving as one `replace`.
+     */
     readonly watchThreadChat: (
       hopliteThreadId: string,
+      activity: Stream.Stream<void>,
     ) => Stream.Stream<CloudTaskChatEvent, HopliteCloudError>;
   }
 >()("t3/hopliteCloud/HopliteCloudService/HopliteCloud") {}
@@ -690,7 +694,7 @@ const make = Effect.gen(function* () {
 
   const connected = Effect.map(storedProviders, (stored) => stored.length > 0);
 
-  const watchThreadChat = (hopliteThreadId: string) =>
+  const watchThreadChat = (hopliteThreadId: string, activity: Stream.Stream<void>) =>
     Stream.unwrap(
       Effect.map(requireKey, (apiKey) =>
         Stream.unwrap(
@@ -698,7 +702,7 @@ const make = Effect.gen(function* () {
             openTimeout: "10 seconds",
             headers: { "X-Api-Key": apiKey },
           }).pipe(
-            Effect.map((socket) => watchHopliteThreadChat({ socket, hopliteThreadId })),
+            Effect.map((socket) => watchHopliteThreadChat({ socket, hopliteThreadId, activity })),
             Effect.provide(NodeSocket.layerWebSocketConstructor),
           ),
         ).pipe(
