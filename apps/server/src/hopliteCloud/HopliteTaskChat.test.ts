@@ -3,6 +3,7 @@ import { EnvironmentId, NodeId, type OrchestrationV2Subagent, ThreadId } from "@
 import type * as AcpProtocol from "effect-acp/protocol";
 import type * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
 import * as Sink from "effect/Sink";
 import * as Stdio from "effect/Stdio";
@@ -10,9 +11,9 @@ import * as Stream from "effect/Stream";
 
 import {
   makeChatReducer,
-  reloadOnActivity,
   watchAcpThreadChat,
   watchTaskChat,
+  withRunning,
 } from "./HopliteTaskChat.ts";
 
 const text = (value: string) => ({ type: "text" as const, text: value });
@@ -53,6 +54,7 @@ const fakeHopliteAgent = Effect.gen(function* () {
   const send = (message: unknown) =>
     Queue.offer(input, encoder.encode(`${JSON.stringify(message)}\n`));
   let authenticated = false;
+  let loads = 0;
   let pending = "";
   const handle = (message: { id?: number; method?: string; params?: unknown }) => {
     if (message.method === undefined || message.id === undefined) return Effect.void;
@@ -72,21 +74,32 @@ const fakeHopliteAgent = Effect.gen(function* () {
         authenticated =
           (message.params as { methodId?: string } | undefined)?.methodId === "hoplite-api-key";
         return send({ jsonrpc: "2.0", id: message.id, result: {} });
-      case "session/load":
-        return authenticated
-          ? send({
+      case "session/load": {
+        if (!authenticated)
+          return send({
+            jsonrpc: "2.0",
+            id: message.id,
+            error: { code: -32000, message: "Authentication required" },
+          });
+        loads += 1;
+        // Each load replays the history; a message sent meanwhile appears from the second load.
+        const updates = [
+          { sessionUpdate: "agent_message_chunk", content: text("Hi") },
+          ...(loads > 1
+            ? [{ sessionUpdate: "user_message_chunk", content: text("Follow up"), messageId: "m2" }]
+            : []),
+        ];
+        return Effect.forEach(
+          updates,
+          (update) =>
+            send({
               jsonrpc: "2.0",
               method: "session/update",
-              params: {
-                sessionId: "thr_remote",
-                update: { sessionUpdate: "agent_message_chunk", content: text("Hi") },
-              },
-            }).pipe(Effect.andThen(send({ jsonrpc: "2.0", id: message.id, result: {} })))
-          : send({
-              jsonrpc: "2.0",
-              id: message.id,
-              error: { code: -32000, message: "Authentication required" },
-            });
+              params: { sessionId: "thr_remote", update },
+            }),
+          { discard: true },
+        ).pipe(Effect.andThen(send({ jsonrpc: "2.0", id: message.id, result: {} })));
+      }
       default:
         return send({
           jsonrpc: "2.0",
@@ -121,6 +134,7 @@ it.effect("logs in to Hoplite's ACP connection before loading the thread", () =>
     const events = yield* watchAcpThreadChat({
       stdio: Effect.succeed(agent.stdio),
       hopliteThreadId: "thr_remote",
+      activity: Stream.empty,
     }).pipe(Stream.take(2), Stream.runCollect);
     assert.deepStrictEqual(agent.methods, ["initialize", "authenticate", "session/load"]);
     assert.deepStrictEqual(events, [
@@ -186,39 +200,61 @@ it.effect("streams only tasks delegated to Hoplite from this thread", () =>
   }),
 );
 
-it.effect("replays the chat as one replacement when the task has activity", () =>
+it.effect("reloads the chat on the same connection when the task has activity", () =>
   Effect.gen(function* () {
-    const message = (id: string, role: "user" | "assistant", value: string) => ({
-      _tag: "upsert" as const,
-      entry: { _tag: "message" as const, id, role, text: value },
-    });
-    const live = { _tag: "live" as const };
-    let opened = 0;
-    // The first connection stays open, as Hoplite's does, and misses the follow-up.
-    const open = Stream.suspend(() => {
-      opened += 1;
-      return opened === 1
-        ? Stream.concat(Stream.make(message("m1", "user", "Fix login"), live), Stream.never)
-        : Stream.make(
-            message("m1", "user", "Fix login"),
-            message("m2", "user", "Also logout"),
-            message("assistant-1", "assistant", "Do"),
-            { _tag: "append" as const, id: "assistant-1", text: "ne" },
-            live,
-          );
-    });
-    const events = yield* reloadOnActivity(open, Stream.make(undefined)).pipe(Stream.runCollect);
-    assert.strictEqual(opened, 2);
-    assert.deepStrictEqual(events.slice(-2), [
+    const agent = yield* fakeHopliteAgent;
+    const activity = yield* Queue.unbounded<void>();
+    let acquired = 0;
+    const collected = yield* watchAcpThreadChat({
+      stdio: Effect.sync(() => {
+        acquired += 1;
+        return agent.stdio;
+      }),
+      hopliteThreadId: "thr_remote",
+      activity: Stream.fromQueue(activity),
+    }).pipe(Stream.take(4), Stream.runCollect, Effect.forkChild);
+    yield* Queue.offer(activity, undefined);
+    const events = yield* Fiber.join(collected);
+    assert.strictEqual(acquired, 1);
+    assert.deepStrictEqual(agent.methods, [
+      "initialize",
+      "authenticate",
+      "session/load",
+      "session/load",
+    ]);
+    assert.deepStrictEqual(events, [
+      {
+        _tag: "upsert",
+        entry: { _tag: "message", id: "assistant-1", role: "assistant", text: "Hi" },
+      },
+      { _tag: "live" },
       {
         _tag: "replace",
         entries: [
-          message("m1", "user", "Fix login").entry,
-          message("m2", "user", "Also logout").entry,
-          message("assistant-1", "assistant", "Done").entry,
+          { _tag: "message", id: "assistant-1", role: "assistant", text: "Hi" },
+          { _tag: "message", id: "m2", role: "user", text: "Follow up" },
         ],
       },
-      live,
+      { _tag: "live" },
+    ]);
+  }),
+);
+
+it.effect("marks each live event with whether the run is going when it passes", () =>
+  Effect.gen(function* () {
+    const states = [true, false];
+    const upsert = {
+      _tag: "upsert" as const,
+      entry: { _tag: "message" as const, id: "m1", role: "user" as const, text: "Fix login" },
+    };
+    const events = yield* withRunning(
+      Stream.make(upsert, { _tag: "live" as const }, { _tag: "live" as const }),
+      Effect.sync(() => states.shift() ?? false),
+    ).pipe(Stream.runCollect);
+    assert.deepStrictEqual(events, [
+      upsert,
+      { _tag: "live", running: true },
+      { _tag: "live", running: false },
     ]);
   }),
 );
