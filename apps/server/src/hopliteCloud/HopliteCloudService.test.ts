@@ -34,6 +34,8 @@ const thread = {
 const makeHarness = () => {
   const stored = new Map<string, Uint8Array>();
   const sent: Array<Sent> = [];
+  /** Paths that answer with this status instead, as a flaky or rate-limited Hoplite would. */
+  const failing = new Map<string, number>();
   const secrets = ServerSecretStore.ServerSecretStore.of({
     get: (name) => Effect.sync(() => Option.fromNullishOr(stored.get(name))),
     set: (name, value) => Effect.sync(() => void stored.set(name, value)),
@@ -54,6 +56,8 @@ const makeHarness = () => {
     if (request.headers.authorization !== `Bearer ${GOOD_KEY}`) {
       return respond(401, { ok: false, error: "unauthorized" });
     }
+    const failStatus = failing.get(url.pathname);
+    if (failStatus !== undefined) return respond(failStatus, { ok: false, error: "failed" });
     if (url.pathname === "/api/source-control/github/repositories") {
       return respond(200, {
         ok: true,
@@ -169,7 +173,7 @@ const makeHarness = () => {
     Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
     Layer.provide(NodeCrypto.layer),
   );
-  return { stored, sent, layer };
+  return { stored, sent, failing, layer };
 };
 
 const errorCode = <A, E extends { readonly code: string }, R>(effect: Effect.Effect<A, E, R>) =>
@@ -196,6 +200,8 @@ it.effect("connecting checks the key, and a task starts in the repo's project", 
     const hoplite = yield* HopliteCloud.HopliteCloud;
     const connected = yield* hoplite.connect("hoplite", GOOD_KEY);
     assert.deepInclude(connected, { connected: true, problem: null });
+    // Checking the key, before saving it and again for the status, reads one page each.
+    assert.equal(harness.sent.filter((request) => request.path === "/api/projects").length, 2);
 
     assert.equal(yield* errorCode(hoplite.startTask({ prompt: "Fix login" })), "project_required");
 
@@ -225,9 +231,30 @@ it.effect("a task naming a repo uses the project that has it, or creates one", (
         .filter((request) => request.method === "POST" && request.path === "/api/threads")
         .map((request) => request.body);
 
+    const projectListings = () =>
+      harness.sent.filter((request) => request.method === "GET" && request.path === "/api/projects")
+        .length;
+
     yield* hoplite.startTask({ prompt: "Fix login", repo: "https://github.com/Acme/API.git" });
     assert.deepStrictEqual(threadBodies().at(-1), { projectId: "prj_2", prompt: "Fix login" });
     assert.isFalse(harness.sent.some((request) => request.path.startsWith("/api/source-control")));
+
+    // The repo's project is remembered, so the next task skips the listing.
+    const listed = projectListings();
+    yield* hoplite.startTask({ prompt: "Fix signup", repo: "acme/api" });
+    assert.deepStrictEqual(threadBodies().at(-1), { projectId: "prj_2", prompt: "Fix signup" });
+    assert.equal(projectListings(), listed);
+
+    // A remembered project Hoplite no longer has is looked up once more.
+    harness.failing.set("/api/threads", 404);
+    const threadsBefore = threadBodies().length;
+    assert.equal(
+      yield* errorCode(hoplite.startTask({ prompt: "Fix it", repo: "acme/api" })),
+      "not_found",
+    );
+    assert.equal(threadBodies().length, threadsBefore + 2);
+    assert.equal(projectListings(), listed + 2);
+    harness.failing.clear();
 
     yield* hoplite.startTask({ prompt: "Fix cart", repo: "acme/shop" });
     const created = harness.sent.find(
@@ -264,6 +291,13 @@ it.effect("a task reads its active run, latest reply and pull request", () => {
       pullRequestUrl: "https://github.com/o/r/pull/7",
     });
     assert.equal(yield* errorCode(hoplite.getTask({ threadId: "thr_gone" })), "not_found");
+
+    // A failed read fails the task read rather than reporting the latest finished run.
+    for (const path of ["/api/threads/thr_1/active-run", "/api/threads/thr_1/run-state"]) {
+      harness.failing.set(path, 503);
+      assert.equal(yield* errorCode(hoplite.readTask({ threadId: "thr_1" })), "unavailable", path);
+      harness.failing.clear();
+    }
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -294,6 +328,12 @@ it.effect("a task takes follow-ups, stops its active run, and reports its previe
     const message = harness.sent.find((request) => request.path.endsWith("/messages"));
     assert.deepStrictEqual(message?.body, { content: "Also fix signup" });
     assert.equal(message?.headers["idempotency-key"], "t3code:req-2");
+
+    // Without the active run there is no knowing which run to stop.
+    harness.failing.set("/api/threads/thr_1/active-run", 503);
+    assert.equal(yield* errorCode(hoplite.stopTask({ threadId: "thr_1" })), "unavailable");
+    assert.isFalse(harness.sent.some((request) => request.path.endsWith("/stop")));
+    harness.failing.clear();
 
     yield* hoplite.stopTask({ threadId: "thr_1" });
     // Hoplite stops only a named run: the one run-state reported as running.

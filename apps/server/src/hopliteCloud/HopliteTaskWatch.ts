@@ -203,6 +203,8 @@ export class HopliteTaskWatch extends Context.Service<
     readonly sweep: Effect.Effect<void>;
     /** Fires when a Hoplite thread's chat may have changed: a message, answer or stop sent, or a run settled. */
     readonly threadActivity: (hopliteThreadId: string) => Stream.Stream<void>;
+    /** Whether a run on this Hoplite thread is still being watched to settle. */
+    readonly watching: (hopliteThreadId: string) => Effect.Effect<boolean>;
   }
 >()("t3/hopliteCloud/HopliteTaskWatch") {}
 
@@ -236,6 +238,12 @@ const make = Effect.gen(function* () {
   );
   const sameTask = (a: HopliteTaskWatchEntry, b: HopliteTaskWatchEntry) =>
     a.callerThreadId === b.callerThreadId && a.hopliteThreadId === b.hopliteThreadId;
+  // The failure count is not worth a write; after a restart it starts again from zero.
+  const sameButFailures = (a: HopliteTaskWatchEntry, b: HopliteTaskWatchEntry) => {
+    const fields = new Set([...Object.keys(a), ...Object.keys(b)] as Array<keyof typeof a>);
+    fields.delete("failures");
+    return [...fields].every((field) => a[field] === b[field]);
+  };
 
   /** Replaces any watch on the same task by the same caller; false when full. */
   const add = (watch: HopliteTaskWatchEntry) =>
@@ -245,9 +253,11 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.tap(persist));
   // Only the exact entry a sweep read is replaced, so a newer watch from a message wins.
   const replace = (from: HopliteTaskWatchEntry, to: HopliteTaskWatchEntry | null) =>
-    Ref.update(watches, (current) =>
-      current.flatMap((entry) => (entry !== from ? [entry] : to === null ? [] : [to])),
-    ).pipe(Effect.andThen(persist));
+    Ref.modify(watches, (current) => {
+      if (!current.includes(from)) return [false, current];
+      const next = current.flatMap((entry) => (entry !== from ? [entry] : to === null ? [] : [to]));
+      return [to === null || !sameButFailures(from, to), next];
+    }).pipe(Effect.flatMap((changed) => (changed ? persist : Effect.void)));
 
   const resultFor = (task: HopliteCloudTask, watched: boolean): HopliteCloudTaskResult =>
     watched ? { ...task, next: HOPLITE_TASK_WAKES_NEXT } : task;
@@ -368,8 +378,10 @@ const make = Effect.gen(function* () {
     // A message queued behind the active run gets no run id; the run before it is the baseline.
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const { runId } = yield* hoplite.sendMessage(input);
-    yield* touched(input.threadId);
-    if (callerThreadId === undefined) return before.task;
+    if (callerThreadId === undefined) {
+      yield* touched(input.threadId);
+      return before.task;
+    }
     const taskId = yield* recordCard({
       callerThreadId,
       hopliteThreadId: input.threadId,
@@ -387,6 +399,8 @@ const make = Effect.gen(function* () {
       failures: 0,
       ...(taskId === undefined ? {} : { taskId }),
     });
+    // After the watch is saved, so a chat reloading on this reads the new run as going.
+    yield* touched(input.threadId);
     return resultFor(before.task, watched);
   });
 
@@ -396,8 +410,10 @@ const make = Effect.gen(function* () {
   ) {
     const before = yield* hoplite.readTask({ threadId: input.threadId });
     const answered = yield* hoplite.answerQuestion(input);
-    yield* touched(input.threadId);
-    if (callerThreadId === undefined) return before.task;
+    if (callerThreadId === undefined) {
+      yield* touched(input.threadId);
+      return before.task;
+    }
     const runId = answered.runId;
     const taskId = yield* recordCard({
       callerThreadId,
@@ -418,6 +434,7 @@ const make = Effect.gen(function* () {
       answeredQuestionId: input.questionId,
       ...(taskId === undefined ? {} : { taskId }),
     });
+    yield* touched(input.threadId);
     return resultFor(before.task, watched);
   });
 
@@ -474,12 +491,13 @@ const make = Effect.gen(function* () {
     message: { readonly text: string; readonly notification: OrchestrationV2Notification },
     status: CardStatus,
   ) =>
-    touched(watch.hopliteThreadId).pipe(
-      Effect.andThen(
-        watch.taskId === undefined
-          ? wake(watch, key, message)
-          : completeCard(watch.callerThreadId, watch.taskId, status, message.text, "ran-out"),
-      ),
+    (watch.taskId === undefined
+      ? wake(watch, key, message)
+      : completeCard(watch.callerThreadId, watch.taskId, status, message.text, "ran-out")
+    ).pipe(
+      // The watch goes before the chat is told, so a chat reloading on this reads the run as over.
+      Effect.andThen(replace(watch, null)),
+      Effect.andThen(touched(watch.hopliteThreadId)),
     );
 
   const check = Effect.fnUntraced(function* (watch: HopliteTaskWatchEntry) {
@@ -490,11 +508,13 @@ const make = Effect.gen(function* () {
       }),
     );
     if (read._tag === "Failure") {
+      // Rate limiting says nothing about the task; the next sweep tries again.
+      if (read.failure.code === "rate_limited") return;
       const failures = watch.failures + 1;
       if (!GIVE_UP_CODES.includes(read.failure.code) && failures < READ_FAILURE_LIMIT) {
         return yield* replace(watch, { ...watch, failures });
       }
-      yield* settle(
+      return yield* settle(
         watch,
         `unread:${watch.runId ?? watch.afterRunId ?? "none"}`,
         {
@@ -507,7 +527,6 @@ const make = Effect.gen(function* () {
         },
         "failed",
       );
-      return yield* replace(watch, null);
     }
     const step = stepWatch(watch, read.success.run);
     if (step.type === "wait") {
@@ -538,7 +557,6 @@ const make = Effect.gen(function* () {
       settledWake(read.success.task, status, questions),
       cardStatus(status),
     );
-    yield* replace(watch, null);
   });
 
   /**
@@ -581,7 +599,9 @@ const make = Effect.gen(function* () {
 
   const sweep = Ref.get(watches).pipe(
     Effect.flatMap((current) => Effect.forEach(current, check, { concurrency: 4, discard: true })),
-    Effect.andThen(sweepCards),
+    // Without a stored key no stop can be sent, so the cards are left for when one is.
+    Effect.andThen(hoplite.connected),
+    Effect.flatMap((connected) => (connected ? sweepCards : Effect.void)),
     Effect.catchCause((cause) => Effect.logWarning("hoplite-cloud.watch-sweep-failed", { cause })),
     Effect.withSpan("HopliteTaskWatch.sweep"),
   );
@@ -595,6 +615,10 @@ const make = Effect.gen(function* () {
     stopTask,
     sweep,
     threadActivity,
+    watching: Effect.fn("HopliteTaskWatch.watching")(function* (hopliteThreadId: string) {
+      const current = yield* Ref.get(watches);
+      return current.some((entry) => entry.hopliteThreadId === hopliteThreadId);
+    }),
   });
 });
 
