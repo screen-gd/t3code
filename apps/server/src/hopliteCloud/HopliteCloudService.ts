@@ -75,6 +75,7 @@ const CODEX_CREDENTIAL_SECRET = "cloud-sandbox-codex-credential";
 const RETIRED_CREDENTIALS_SECRET = "cloud-sandbox-retired-credentials";
 const RetiredCredentialsJson = Schema.fromJsonString(Schema.Array(Schema.String));
 const decodeRetiredCredentials = Schema.decodeOption(RetiredCredentialsJson);
+const encodeRetiredCredentials = Schema.encodeEffect(RetiredCredentialsJson);
 const MAX_RETIRED_CREDENTIALS = 20;
 const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = [
   "hoplite",
@@ -519,10 +520,10 @@ const make = Effect.gen(function* () {
     const saved = yield* readSecret(secretName);
     if (saved._tag === "None") return;
     const retired = yield* retiredCredentials;
-    yield* saveSecret(
-      RETIRED_CREDENTIALS_SECRET,
-      JSON.stringify([...new Set([saved.value, ...retired])].slice(0, MAX_RETIRED_CREDENTIALS)),
-    );
+    const encoded = yield* encodeRetiredCredentials(
+      [...new Set([saved.value, ...retired])].slice(0, MAX_RETIRED_CREDENTIALS),
+    ).pipe(Effect.mapError(() => failure("unavailable")));
+    yield* saveSecret(RETIRED_CREDENTIALS_SECRET, encoded);
   });
   // Every key a sandbox can hold, to keep out of anything that comes back from it.
   const sandboxSecrets = (apiKey: string) =>

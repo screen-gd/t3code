@@ -1,3 +1,4 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Digest is effectful; agentTurnEnv builds its environment synchronously.
 import * as NodeCrypto from "node:crypto";
 
 import type { CloudTaskChatEntry, HopliteCloudThreadStatus } from "@t3tools/contracts";
@@ -200,9 +201,13 @@ export const readTurnScript = (input?: { readonly turn: number } | { readonly qu
         : [
             `item=$(printf '%06d' ${input.queued})`,
             'state=""',
-            `for dir in "${STATE_DIR}"/runs/*/; do`,
-            '  if [ -f "$dir/item" ] && [ "$(cat "$dir/item" 2>/dev/null)" = "$item" ]; then state="${dir%/}"; break; fi',
-            "done",
+            `find_item() { for dir in "${STATE_DIR}"/runs/*/; do`,
+            '  if [ -f "$dir/item" ] && [ "$(cat "$dir/item" 2>/dev/null)" = "$item" ]; then state="${dir%/}"; return; fi',
+            "done; }",
+            "find_item",
+            // The runner writes `item` before it moves the prompt out of the queue, so a
+            // second look after the prompt left finds the turn it became.
+            `if [ -z "$state" ] && [ ! -f "${STATE_DIR}/queue/$item.prompt" ]; then find_item; fi`,
             'if [ -n "$state" ]; then turn=$(basename "$state"); else turn=""; fi',
           ]),
     'echo "turn=$turn"',
