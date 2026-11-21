@@ -8631,6 +8631,8 @@
   "e4e91d155cb6a9b4": "Barre latérale classique (regrouper par projet)",
   "f079556d67367fe7": "Affiche les fils des dossiers sur deux lignes : le titre, puis la branche, la pull request et l’agent.",
   "ac1e5c94d1ad3c6a": "Lignes de dossier sur deux lignes",
+  "39f46cf9e6961659": "Closing the window keeps T3 Code running in the system tray, so agents and remote connections keep working. Open or quit it from the tray icon.",
+  "bbff660f775ee4de": "Keep running in tray",
   "9ae293971d93c819": "Partagez un fil avec un invité qui le suit en direct dans un navigateur et envoie des messages que vous approuvez. Connectez-vous à T3 Connect pour utiliser les liens invités.",
   "0aa5406ac4d7f7c7": "Liens invités",
   "f0e853acd2006d53": "Environnements associés",

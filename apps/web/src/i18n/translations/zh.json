@@ -8648,6 +8648,8 @@
   "e4e91d155cb6a9b4": "简洁侧边栏（按项目分组）",
   "f079556d67367fe7": "分两行显示文件夹内的会话：第一行显示标题，第二行显示分支、pull request 和智能体。",
   "ac1e5c94d1ad3c6a": "双行文件夹列表",
+  "39f46cf9e6961659": "Closing the window keeps T3 Code running in the system tray, so agents and remote connections keep working. Open or quit it from the tray icon.",
+  "bbff660f775ee4de": "Keep running in tray",
   "9ae293971d93c819": "与访客共享会话，访客可在浏览器中实时查看，并发送需要你批准的消息。登录 T3 Connect 后即可使用访客链接。",
   "0aa5406ac4d7f7c7": "访客链接",
   "f0e853acd2006d53": "关联环境",
