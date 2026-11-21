@@ -15,6 +15,7 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { hopliteCloudEnvironment } from "~/state/hopliteCloud";
 import { useEnvironmentQuery } from "~/state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { ConnectionStatusDot } from "../ConnectionStatusDot";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -238,7 +239,12 @@ export function HopliteCloudSection() {
                 </span>
               }
               description={
-                entry?.problem ?? (entry?.connected ? gt("Connected") : gt("Not connected"))
+                entry?.problem ?? (
+                  <span className="flex items-center gap-1.5">
+                    {entry?.connected ? <ConnectionStatusDot dotClassName="bg-success" /> : null}
+                    {entry?.connected ? gt("Connected") : gt("Not connected")}
+                  </span>
+                )
               }
               control={
                 <Button
