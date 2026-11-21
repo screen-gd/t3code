@@ -221,7 +221,7 @@ export function HopliteCloudSection() {
             <SettingsRow
               key={provider.id}
               title={<Skeleton className="h-4 w-24" />}
-              description={<Skeleton className="h-3 w-32" />}
+              status={<Skeleton className="h-3 w-32" />}
               control={<Skeleton className="h-7 w-20" />}
             />
           ))
