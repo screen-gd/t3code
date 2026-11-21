@@ -1,3 +1,5 @@
+import * as NodeCrypto from "node:crypto";
+
 import type { CloudTaskChatEntry, HopliteCloudThreadStatus } from "@t3tools/contracts";
 
 import type { AgentKeys, CommandResult } from "./CloudSandboxProviders.ts";
@@ -12,20 +14,46 @@ const ERR_MARKER = "---t3-task-err---";
 const CURRENT_STATE = `turn=$(cat "${STATE_DIR}/turn" 2>/dev/null || true); state="${STATE_DIR}/runs/$turn"; [ -d "$state" ] || state="${STATE_DIR}"`;
 
 /**
+ * A real lock on every image: flock where it exists, a mkdir lock that sweeps a
+ * dead owner where it does not. Always the first call in a `( )` or `$( )` subshell,
+ * so the lock frees when the subshell exits.
+ */
+const T3_LOCK = `t3_lock() {
+  if command -v flock >/dev/null 2>&1; then exec 9>"$STATE_DIR/lock"; flock 9; return; fi
+  while ! mkdir "$STATE_DIR/lock.d" 2>/dev/null; do
+    owner=$(cat "$STATE_DIR/lock.d/pid" 2>/dev/null || true)
+    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$STATE_DIR/lock.d"; continue; fi
+    sleep 0.1
+  done
+  echo "$BASHPID" > "$STATE_DIR/lock.d/pid"
+  trap 'rm -rf "$STATE_DIR/lock.d"' EXIT
+}`;
+
+/**
+ * Sets `live` to 1 only when the recorded runner really runs: its marker exists, its
+ * pid is alive, and a readable /proc cmdline still names runner.sh. Else 0.
+ */
+const RUNNER_LIVE = `live=0
+pid=$(cat "$STATE_DIR/runner.pid" 2>/dev/null || true)
+if [ -f "$STATE_DIR/runner.alive" ] && [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+  live=1
+  if [ -r "/proc/$pid/cmdline" ] && ! grep -qa runner.sh "/proc/$pid/cmdline"; then live=0; fi
+fi`;
+
+/**
  * Works the queue one turn at a time in the background, so a follow-up can land
- * while the last turn still runs. Its fd-9 flock is the same lock the enqueue side
+ * while the last turn still runs. Its t3_lock is the same lock the enqueue side
  * takes, which keeps the queue, the turn counter and `runner.alive` consistent.
  */
 const RUNNER_SCRIPT = `\
 STATE_DIR="${STATE_DIR}"
 cd "$HOME/work" || exit 1
-command -v flock >/dev/null 2>&1 || flock() { :; }
+${T3_LOCK}
 agent=$(cat "$STATE_DIR/agent" 2>/dev/null || true)
 [ -z "$agent" ] && agent=claude
 while :; do
   turn=$(
-    exec 9>"$STATE_DIR/lock"
-    flock 9
+    t3_lock
     item=$(ls "$STATE_DIR/queue" 2>/dev/null | sed -n 's/\\.prompt$//p' | sort -n | head -1)
     if [ -z "$item" ]; then
       rm -f "$STATE_DIR/runner.alive"
@@ -34,6 +62,7 @@ while :; do
     next=$(( $(cat "$STATE_DIR/turn" 2>/dev/null || echo 0) + 1 ))
     echo "$next" > "$STATE_DIR/turn"
     mkdir -p "$STATE_DIR/runs/$next"
+    echo "$item" > "$STATE_DIR/runs/$next/item"
     mv "$STATE_DIR/queue/$item.prompt" "$STATE_DIR/runs/$next/prompt"
     if ! mv "$STATE_DIR/queue/$item.model" "$STATE_DIR/runs/$next/model" 2>/dev/null; then
       cp "$STATE_DIR/runs/$((next - 1))/model" "$STATE_DIR/runs/$next/model" 2>/dev/null || true
@@ -56,8 +85,7 @@ while :; do
   fi
   code=$?
   (
-    exec 9>"$STATE_DIR/lock"
-    flock 9
+    t3_lock
     echo "$code" > "$state/exit"
   )
 done
@@ -65,12 +93,14 @@ done
 
 /**
  * What runs inside the sandbox to hand the agent a message: prompt, repo, model and
- * keys arrive as environment variables, never in its text. Under the runner's lock it
- * either starts the runner and names the turn its message gets, or queues and reports `queued`.
+ * keys arrive as environment variables, never in its text. Under the task lock it
+ * either (re)starts the runner and names the turn its message gets, or queues the
+ * message and reports `queued`; a live runner on another login refuses it first.
  */
 export const agentTurnScript = (input: { readonly first: boolean }) =>
   [
     "set -e",
+    `STATE_DIR="${STATE_DIR}"`,
     `mkdir -p "${STATE_DIR}/queue"`,
     `git config --global credential.helper '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'`,
     ...(input.first
@@ -81,36 +111,61 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
       : []),
     'mkdir -p "$HOME/work"',
     // mv keeps a runner that is already inside the old file on its own copy.
-    `cat > "${STATE_DIR}/runner.sh.tmp" <<'T3_RUNNER'`,
+    `cat > "${STATE_DIR}/runner.sh.$$" <<'T3_RUNNER'`,
     RUNNER_SCRIPT,
     "T3_RUNNER",
-    `mv -f "${STATE_DIR}/runner.sh.tmp" "${STATE_DIR}/runner.sh"`,
+    `mv -f "${STATE_DIR}/runner.sh.$$" "${STATE_DIR}/runner.sh"`,
     `chmod +x "${STATE_DIR}/runner.sh"`,
-    "command -v flock >/dev/null 2>&1 || flock() { :; }",
+    T3_LOCK,
     "(",
-    `  exec 9>"${STATE_DIR}/lock"`,
-    "  flock 9",
+    "  t3_lock",
+    RUNNER_LIVE.split("\n")
+      .map((line) => `  ${line}`)
+      .join("\n"),
+    // A live runner on a different login owns the task; refuse before touching seq or queue.
+    `  if [ "$live" = 1 ] && [ -f "${STATE_DIR}/runner.key" ] && [ "$(cat "${STATE_DIR}/runner.key" 2>/dev/null)" != "\${T3_TASK_KEY_ID:-}" ]; then`,
+    '    echo "---t3-task-login-changed---"',
+    "    exit 3",
+    "  fi",
+    `  if [ "$live" != 1 ]; then`,
+    // A dead runner left its turn without an exit: mark it killed and drop what it queued.
+    `    turn_now=$(cat "${STATE_DIR}/turn" 2>/dev/null || echo 0)`,
+    `    if [ -d "${STATE_DIR}/runs/$turn_now" ] && [ ! -f "${STATE_DIR}/runs/$turn_now/exit" ]; then`,
+    `      echo 137 > "${STATE_DIR}/runs/$turn_now/exit"`,
+    "    fi",
+    `    rm -f "${STATE_DIR}"/queue/*.prompt "${STATE_DIR}"/queue/*.model`,
+    // The queue item lands only after the pid exists, so a reader that sees the item
+    // sees a live pid; the runner still dequeues it once it takes the lock.
+    `    touch "${STATE_DIR}/runner.alive"`,
+    `    setsid nohup bash "${STATE_DIR}/runner.sh" </dev/null >/dev/null 2>&1 9>&- &`,
+    `    echo $! > "${STATE_DIR}/runner.pid"`,
+    `    printf '%s' "\${T3_TASK_KEY_ID:-}" > "${STATE_DIR}/runner.key"`,
+    "  fi",
     `  seq=$(( $(cat "${STATE_DIR}/seq" 2>/dev/null || echo 0) + 1 ))`,
     `  echo "$seq" > "${STATE_DIR}/seq"`,
     "  item=$(printf '%06d' \"$seq\")",
     `  printf '%s' "$T3_TASK_PROMPT" > "${STATE_DIR}/queue/$item.prompt"`,
     `  if [ -n "\${T3_TASK_MODEL:-}" ]; then printf '%s' "$T3_TASK_MODEL" > "${STATE_DIR}/queue/$item.model"; fi`,
-    `  if [ -f "${STATE_DIR}/runner.alive" ] && kill -0 "$(cat "${STATE_DIR}/runner.pid" 2>/dev/null)" 2>/dev/null; then`,
-    '    echo "queued"',
+    `  if [ "$live" = 1 ]; then`,
+    `    echo "queued=$seq"`,
     "  else",
-    `    touch "${STATE_DIR}/runner.alive"`,
-    `    setsid nohup bash "${STATE_DIR}/runner.sh" </dev/null >/dev/null 2>&1 9>&- &`,
-    `    echo $! > "${STATE_DIR}/runner.pid"`,
     `    echo "turn=$(( $(cat "${STATE_DIR}/turn" 2>/dev/null || echo 0) + 1 ))"`,
     "  fi",
     ")",
   ].join("\n");
 
-/** The run id of the turn agentTurnScript started; null while its message queued behind one. */
+/** The run id agentTurnScript reports: `turn-N` for a started turn, `queued-N` for a queued message. */
 export const startedRunId = (result: CommandResult) => {
   const turn = [...result.output.matchAll(/^turn=(\d+)$/gm)].at(-1)?.[1];
-  return turn === undefined ? null : `turn-${turn}`;
+  if (turn !== undefined) return `turn-${turn}`;
+  const queued = [...result.output.matchAll(/^queued=(\d+)$/gm)].at(-1)?.[1];
+  return queued === undefined ? null : `queued-${queued}`;
 };
+
+// A short fingerprint of the agent credential: a live runner refuses follow-ups
+// signed with another login than the one it started on.
+const keyId = (variable: string, value: string) =>
+  NodeCrypto.createHash("sha256").update(`${variable}\0${value}`).digest("hex").slice(0, 16);
 
 export const agentTurnEnv = (
   keys: AgentKeys,
@@ -123,22 +178,43 @@ export const agentTurnEnv = (
     ? {}
     : { GH_TOKEN: keys.githubToken, GITHUB_TOKEN: keys.githubToken }),
   T3_TASK_AGENT: keys.agent.name,
+  T3_TASK_KEY_ID: keyId(keys.agent.variable, keys.agent.value),
   T3_TASK_PROMPT: prompt,
   ...(repo === undefined ? {} : { T3_TASK_REPO: repo }),
   ...(model === undefined ? {} : { T3_TASK_MODEL: model }),
 });
 
 // Whole lines from the start of the reply and the end of the log, so no key is cut in two.
-export const readTurnScript = (turn?: number) =>
+// `{queued: N}` reads the run a queue item became, or says pending/dropped while it waits.
+export const readTurnScript = (input?: { readonly turn: number } | { readonly queued: number }) =>
   [
-    ...(turn === undefined
+    `STATE_DIR="${STATE_DIR}"`,
+    RUNNER_LIVE,
+    ...(input === undefined
       ? [CURRENT_STATE]
-      : [
-          `turn=${turn}; state="${STATE_DIR}/runs/$turn"`,
-          `if [ ! -d "$state" ] && [ "$(cat "${STATE_DIR}/turn" 2>/dev/null)" = "$turn" ]; then state="${STATE_DIR}"; fi`,
-        ]),
+      : "turn" in input
+        ? [
+            `turn=${input.turn}; state="${STATE_DIR}/runs/$turn"`,
+            `if [ ! -d "$state" ] && [ "$(cat "${STATE_DIR}/turn" 2>/dev/null)" = "$turn" ]; then state="${STATE_DIR}"; fi`,
+          ]
+        : [
+            `item=$(printf '%06d' ${input.queued})`,
+            'state=""',
+            `for dir in "${STATE_DIR}"/runs/*/; do`,
+            '  if [ -f "$dir/item" ] && [ "$(cat "$dir/item" 2>/dev/null)" = "$item" ]; then state="${dir%/}"; break; fi',
+            "done",
+            'if [ -n "$state" ]; then turn=$(basename "$state"); else turn=""; fi',
+          ]),
     'echo "turn=$turn"',
+    'echo "live=$live"',
     'echo "exit=$(cat "$state/exit" 2>/dev/null)"',
+    ...(input !== undefined && "queued" in input
+      ? [
+          'if [ -z "$state" ]; then',
+          `  if [ -f "${STATE_DIR}/queue/$item.prompt" ]; then echo "pending=1"; else echo "dropped=1"; fi`,
+          "fi",
+        ]
+      : []),
     'echo "---"',
     'head -c 200000 "$state/out.json" 2>/dev/null || true',
     'size=$(wc -c < "$state/out.jsonl" 2>/dev/null || echo 0)',
@@ -148,9 +224,11 @@ export const readTurnScript = (turn?: number) =>
     'tail -n 40 "$state/err.log" 2>/dev/null || true',
   ].join("\n");
 
-/** The task's chat: each recent turn's prompt, streamed output and exit, then whether it still runs. */
+/** The task's chat: each recent turn's prompt, streamed output and exit, then whether its runner lives. */
 export const readChatScript = () =>
   [
+    `STATE_DIR="${STATE_DIR}"`,
+    RUNNER_LIVE,
     `for state in $(ls -d "${STATE_DIR}"/runs/*/ 2>/dev/null | sort -V | tail -${MAX_CHAT_TURNS.toString()}); do`,
     '  echo "---t3-chat-turn $(basename "$state")---"',
     '  echo "---t3-chat-prompt---"',
@@ -164,13 +242,24 @@ export const readChatScript = () =>
     '  cat "$state/exit" 2>/dev/null; echo',
     "done",
     'echo "---t3-chat-running---"',
-    `[ -f "${STATE_DIR}/runner.alive" ] && echo 1 || echo 0`,
+    'echo "$live"',
   ].join("\n");
 
 export const chatIsRunning = (output: string) => /---t3-chat-running---\s*\n1\s*$/.test(output);
 
-// setsid makes the runner's pid its process group, so this stops the runner, its agent and the queue.
-export const STOP_SCRIPT = `${CURRENT_STATE}; pid=$(cat "${STATE_DIR}/runner.pid" 2>/dev/null); [ -z "$pid" ] && pid=$(cat "$state/pid" 2>/dev/null); kill -- -$pid 2>/dev/null || true; rm -f "${STATE_DIR}"/queue/*.prompt "${STATE_DIR}"/queue/*.model "${STATE_DIR}/runner.alive"; [ -f "$state/exit" ] || echo 130 > "$state/exit"`;
+// setsid makes the runner's pid its process group, so this stops the runner, its agent
+// and the queue. The lock means no queued item becomes a turn between the read and the kill.
+export const STOP_SCRIPT = [
+  `STATE_DIR="${STATE_DIR}"`,
+  T3_LOCK,
+  "(",
+  "  t3_lock",
+  `  ${CURRENT_STATE}`,
+  `  pid=$(cat "${STATE_DIR}/runner.pid" 2>/dev/null); [ -z "$pid" ] && pid=$(cat "$state/pid" 2>/dev/null); kill -- -$pid 2>/dev/null || true`,
+  `  rm -f "${STATE_DIR}"/queue/*.prompt "${STATE_DIR}"/queue/*.model "${STATE_DIR}/runner.alive"`,
+  '  [ -f "$state/exit" ] || echo 130 > "$state/exit"',
+  ")",
+].join("\n");
 
 const PULL_REQUEST = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
 
@@ -445,14 +534,19 @@ export interface TurnState {
 }
 
 /**
- * Reads readTurnScript's output, which must already be redacted: no exit code yet
- * means the agent still runs. Stream-json turns answer with their result line, and
- * with their last assistant text while still running.
+ * Reads readTurnScript's output, which must already be redacted: a turn without an
+ * exit code still runs while its runner lives, and fails when the runner died. A
+ * queue item not picked up yet reports pending or dropped. `runId` keeps the id the
+ * caller asked about, so a `queued-N` watch follows the item through its turn.
  */
-export const parseTurn = (result: CommandResult): TurnState => {
+export const parseTurn = (result: CommandResult, runId?: string): TurnState => {
   const [header = "", ...rest] = result.output.split("\n---\n");
   const turn = /turn=(\d*)/.exec(header)?.[1] ?? "";
   const exit = /exit=(\d*)/.exec(header)?.[1] ?? "";
+  // An old sandbox has no live= line; counting it as live is the safer read.
+  const live = /live=(\d)/.exec(header)?.[1] ?? "1";
+  const pending = /pending=1/.test(header);
+  const dropped = /dropped=1/.test(header);
   const body = rest.join("\n---\n");
   const markerAt = body.lastIndexOf(ERR_MARKER);
   const out = (markerAt === -1 ? body : body.slice(0, markerAt)).trim();
@@ -490,21 +584,35 @@ export const parseTurn = (result: CommandResult): TurnState => {
   }
   const reply = settled ?? lastAssistant ?? (out.length > 0 ? out : err.length > 0 ? err : null);
   const pullRequests = body.match(PULL_REQUEST);
-  const runId = `turn-${turn === "" ? "0" : turn}`;
-  const state =
-    turn === ""
-      ? { thread: "queued" as const, run: "queued" as const }
-      : exit === ""
-        ? { thread: "running" as const, run: "running" as const }
-        : exit === "0"
-          ? { thread: "ready" as const, run: "completed" as const }
-          : exit === "130"
-            ? { thread: "blocked" as const, run: "cancelled" as const }
-            : { thread: "failed" as const, run: "failed" as const };
+  const id = runId ?? `turn-${turn === "" ? "0" : turn}`;
+  const state = dropped
+    ? { thread: "blocked" as const, run: "cancelled" as const }
+    : pending
+      ? live === "1"
+        ? { thread: "queued" as const, run: "queued" as const }
+        : { thread: "failed" as const, run: "failed" as const }
+      : turn === ""
+        ? { thread: "queued" as const, run: "queued" as const }
+        : exit === ""
+          ? live === "1"
+            ? { thread: "running" as const, run: "running" as const }
+            : { thread: "failed" as const, run: "failed" as const }
+          : exit === "0"
+            ? { thread: "ready" as const, run: "completed" as const }
+            : exit === "130"
+              ? { thread: "blocked" as const, run: "cancelled" as const }
+              : { thread: "failed" as const, run: "failed" as const };
+  const latestReply = dropped
+    ? "This message was cleared before it ran."
+    : pending && live !== "1"
+      ? "The sandbox stopped before this message ran. Send it again."
+      : exit === "" && live !== "1" && turn !== "" && !pending && !dropped
+        ? (reply ?? "The sandbox stopped before this turn finished.")
+        : reply;
   return {
     thread: state.thread,
-    run: { id: runId, status: state.run },
-    latestReply: reply === null ? null : reply.slice(0, MAX_REPLY_LENGTH),
+    run: { id, status: state.run },
+    latestReply: latestReply === null ? null : latestReply.slice(0, MAX_REPLY_LENGTH),
     pullRequestUrl: pullRequests?.at(-1) ?? null,
   };
 };

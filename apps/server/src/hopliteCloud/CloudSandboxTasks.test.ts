@@ -7,18 +7,24 @@ import * as NodePath from "node:path";
 import { assert, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
-import { agentTurnScript, parseChat, parseTurn, readTurnScript } from "./CloudSandboxTasks.ts";
+import {
+  agentTurnScript,
+  chatIsRunning,
+  parseChat,
+  parseTurn,
+  readChatScript,
+  readTurnScript,
+} from "./CloudSandboxTasks.ts";
 
 const bashEnv = (home: string) => ({
   env: { ...process.env, HOME: home.replaceAll("\\", "/") },
   encoding: "utf8" as const,
 });
 
-// Git Bash lacks the Linux-only tools the sandbox has; stubs keep the scripts runnable.
+// Git Bash lacks setsid; there is no flock stub so the mkdir lock is exercised here too.
 const stubUnixTools = (bin: string) => {
   if (HostProcess.Platform.defaultValue() !== "win32") return;
   NodeFS.writeFileSync(NodePath.join(bin, "setsid"), '#!/bin/sh\nexec "$@"\n', { mode: 0o755 });
-  NodeFS.writeFileSync(NodePath.join(bin, "flock"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
 };
 
 it("runs a follow-up queued behind the turn still running", () => {
@@ -35,7 +41,7 @@ it("runs a follow-up queued behind the turn still running", () => {
         "#!/bin/sh",
         'echo "$@" >> "$HOME/.t3-task/args.log"',
         'if [ -f "$HOME/.t3-task/block" ]; then',
-        '  echo started > "$HOME/.t3-task/started"',
+        '  touch "$HOME/.t3-task/started"',
         '  cat "$HOME/.t3-task/release" > /dev/null',
         "fi",
         'printf \'{"result":"%s"}\\n\' "$T3_TASK_PROMPT"',
@@ -45,35 +51,37 @@ it("runs a follow-up queued behind the turn still running", () => {
     );
     const state = NodePath.join(home, ".t3-task");
     NodeFS.mkdirSync(state, { recursive: true });
-    const run = NodeChildProcess.spawnSync(
-      "bash",
-      [
-        "-c",
-        [
-          'export PATH="$HOME/bin:$PATH"',
-          'mkfifo "$HOME/.t3-task/started" "$HOME/.t3-task/release"',
-          'touch "$HOME/.t3-task/block"',
-          'export T3_TASK_PROMPT="first"',
-          'export T3_TASK_MODEL="opus"',
-          agentTurnScript({ first: true }),
-          // The agent has started and is blocked, so the runner is provably alive.
-          'cat "$HOME/.t3-task/started" > /dev/null',
-          'export T3_TASK_PROMPT="second"',
-          "unset T3_TASK_MODEL",
-          agentTurnScript({ first: false }),
-          'rm "$HOME/.t3-task/block"',
-          'echo > "$HOME/.t3-task/release"',
-          // The runner is detached, so its death is the signal both turns ran.
-          'pid=$(cat "$HOME/.t3-task/runner.pid")',
-          'while kill -0 "$pid" 2>/dev/null; do :; done',
-          'rm -f "$HOME/.t3-task/started" "$HOME/.t3-task/release"',
-        ].join("\n"),
-      ],
-      bashEnv(home),
-    );
+    // Long scripts go over stdin: Git Bash truncates a -c argument near 8KB.
+    const run = NodeChildProcess.spawnSync("bash", ["-s"], {
+      ...bashEnv(home),
+      input: [
+        'export PATH="$HOME/bin:$PATH"',
+        'mkfifo "$HOME/.t3-task/release"',
+        'touch "$HOME/.t3-task/block"',
+        'export T3_TASK_PROMPT="first"',
+        'export T3_TASK_MODEL="opus"',
+        agentTurnScript({ first: true }),
+        // The agent signals a plain file; a dead runner fails fast instead of hanging here.
+        'pid=$(cat "$HOME/.t3-task/runner.pid")',
+        'until [ -f "$HOME/.t3-task/started" ] || ! kill -0 "$pid" 2>/dev/null; do :; done',
+        'if ! kill -0 "$pid" 2>/dev/null; then',
+        '  (echo > "$HOME/.t3-task/release") &',
+        '  echo "the runner died before the first turn ran" >&2',
+        "  exit 1",
+        "fi",
+        'export T3_TASK_PROMPT="second"',
+        "unset T3_TASK_MODEL",
+        agentTurnScript({ first: false }),
+        'rm "$HOME/.t3-task/block"',
+        'echo > "$HOME/.t3-task/release"',
+        // The runner is detached, so its death is the signal both turns ran.
+        'while kill -0 "$pid" 2>/dev/null; do :; done',
+        'rm -f "$HOME/.t3-task/started" "$HOME/.t3-task/release"',
+      ].join("\n"),
+    });
     assert.equal(run.status, 0, run.stderr);
     assert.include(run.stdout, "turn=1");
-    assert.include(run.stdout, "queued");
+    assert.include(run.stdout, "queued=2");
     assert.equal(NodeFS.readFileSync(NodePath.join(state, "turn"), "utf8").trim(), "2");
     assert.include(
       NodeFS.readFileSync(NodePath.join(state, "runs", "2", "out.jsonl"), "utf8"),
@@ -84,6 +92,18 @@ it("runs a follow-up queued behind the turn still running", () => {
     assert.include(args[0], "--model opus");
     assert.include(args[1], " -c --model opus");
     assert.equal(NodeFS.readFileSync(NodePath.join(state, "runs", "2", "model"), "utf8"), "opus");
+    // The queued-N id the caller got still reads the run its message became.
+    const queued = NodeChildProcess.spawnSync(
+      "bash",
+      ["-c", readTurnScript({ queued: 2 })],
+      bashEnv(home),
+    );
+    assert.deepStrictEqual(parseTurn({ exitCode: 0, output: queued.stdout }, "queued-2"), {
+      thread: "ready",
+      run: { id: "queued-2", status: "completed" },
+      latestReply: "second",
+      pullRequestUrl: null,
+    });
   } finally {
     NodeFS.rmSync(home, { recursive: true, force: true });
   }
@@ -109,25 +129,21 @@ it("runs codex turns, resuming the last session on follow-ups", () => {
     );
     const state = NodePath.join(home, ".t3-task");
     NodeFS.mkdirSync(state, { recursive: true });
-    const run = NodeChildProcess.spawnSync(
-      "bash",
-      [
-        "-c",
-        [
-          'export PATH="$HOME/bin:$PATH"',
-          'export T3_TASK_AGENT="codex"',
-          'export T3_TASK_PROMPT="first"',
-          'export T3_TASK_MODEL="gpt-5-codex"',
-          agentTurnScript({ first: true }),
-          'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
-          'export T3_TASK_PROMPT="second"',
-          "unset T3_TASK_MODEL",
-          agentTurnScript({ first: false }),
-          'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
-        ].join("\n"),
-      ],
-      bashEnv(home),
-    );
+    const run = NodeChildProcess.spawnSync("bash", ["-s"], {
+      ...bashEnv(home),
+      input: [
+        'export PATH="$HOME/bin:$PATH"',
+        'export T3_TASK_AGENT="codex"',
+        'export T3_TASK_PROMPT="first"',
+        'export T3_TASK_MODEL="gpt-5-codex"',
+        agentTurnScript({ first: true }),
+        'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+        'export T3_TASK_PROMPT="second"',
+        "unset T3_TASK_MODEL",
+        agentTurnScript({ first: false }),
+        'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+      ].join("\n"),
+    });
     assert.equal(run.status, 0, run.stderr);
     assert.equal(NodeFS.readFileSync(NodePath.join(state, "agent"), "utf8"), "codex");
     const args = NodeFS.readFileSync(NodePath.join(state, "args.log"), "utf8").split("\n");
@@ -160,23 +176,19 @@ it("preserves a completed turn when another caller starts the next turn", () => 
       '#!/bin/sh\nprintf \'{"result":"%s"}\\n\' "$T3_TASK_PROMPT"\n',
       { mode: 0o755 },
     );
-    const run = NodeChildProcess.spawnSync(
-      "bash",
-      [
-        "-c",
-        [
-          'export PATH="$HOME/bin:$PATH"',
-          'export T3_TASK_PROMPT="first reply"',
-          agentTurnScript({ first: true }),
-          // The runner is detached, so its death is the signal the turn finished.
-          'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
-          'export T3_TASK_PROMPT="second reply"',
-          agentTurnScript({ first: false }),
-          'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
-        ].join("\n"),
-      ],
-      bashEnv(home),
-    );
+    const run = NodeChildProcess.spawnSync("bash", ["-s"], {
+      ...bashEnv(home),
+      input: [
+        'export PATH="$HOME/bin:$PATH"',
+        'export T3_TASK_PROMPT="first reply"',
+        agentTurnScript({ first: true }),
+        // The runner is detached, so its death is the signal the turn finished.
+        'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+        'export T3_TASK_PROMPT="second reply"',
+        agentTurnScript({ first: false }),
+        'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+      ].join("\n"),
+    });
     assert.equal(run.status, 0, run.stderr);
     assert.equal(
       NodeFS.readFileSync(NodePath.join(home, ".t3-task", "runs", "1", "out.jsonl"), "utf8").trim(),
@@ -184,10 +196,143 @@ it("preserves a completed turn when another caller starts the next turn", () => 
     );
     const latest = NodeChildProcess.spawnSync("bash", ["-c", readTurnScript()], bashEnv(home));
     assert.include(latest.stdout, "second reply");
-    const first = NodeChildProcess.spawnSync("bash", ["-c", readTurnScript(1)], bashEnv(home));
+    const first = NodeChildProcess.spawnSync(
+      "bash",
+      ["-c", readTurnScript({ turn: 1 })],
+      bashEnv(home),
+    );
     assert.include(first.stdout, "first reply");
     assert.include(first.stdout, "exit=0");
     assert.notInclude(first.stdout, "second reply");
+  } finally {
+    NodeFS.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+it("refuses a follow-up while the runner is signed in under a different login", () => {
+  const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-task-"));
+  try {
+    const bin = NodePath.join(home, "bin");
+    NodeFS.mkdirSync(bin);
+    stubUnixTools(bin);
+    NodeFS.writeFileSync(NodePath.join(bin, "git"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    NodeFS.writeFileSync(
+      NodePath.join(bin, "npx"),
+      [
+        "#!/bin/sh",
+        'if [ -f "$HOME/.t3-task/block" ]; then',
+        '  touch "$HOME/.t3-task/started"',
+        '  cat "$HOME/.t3-task/release" > /dev/null',
+        "fi",
+        'printf \'{"result":"%s"}\\n\' "$T3_TASK_PROMPT"',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const state = NodePath.join(home, ".t3-task");
+    NodeFS.mkdirSync(state, { recursive: true });
+    const bash = (script: Array<string>) =>
+      NodeChildProcess.spawnSync("bash", ["-c", script.join("\n")], bashEnv(home));
+    const started = bash([
+      'export PATH="$HOME/bin:$PATH"',
+      'mkfifo "$HOME/.t3-task/release"',
+      'touch "$HOME/.t3-task/block"',
+      'export T3_TASK_PROMPT="first"',
+      'export T3_TASK_KEY_ID="login-a"',
+      agentTurnScript({ first: true }),
+      'pid=$(cat "$HOME/.t3-task/runner.pid")',
+      'until [ -f "$HOME/.t3-task/started" ] || ! kill -0 "$pid" 2>/dev/null; do :; done',
+      'if ! kill -0 "$pid" 2>/dev/null; then',
+      '  (echo > "$HOME/.t3-task/release") &',
+      '  echo "the runner died before the first turn ran" >&2',
+      "  exit 1",
+      "fi",
+    ]);
+    assert.equal(started.status, 0, started.stderr);
+    const refused = bash([
+      'export PATH="$HOME/bin:$PATH"',
+      'export T3_TASK_PROMPT="second"',
+      'export T3_TASK_KEY_ID="login-b"',
+      agentTurnScript({ first: false }),
+    ]);
+    assert.equal(refused.status, 3, refused.stderr);
+    assert.include(refused.stdout, "---t3-task-login-changed---");
+    // Nothing was touched: no queue item, and the sequence did not move.
+    const queue = NodeFS.readdirSync(NodePath.join(state, "queue"));
+    assert.isFalse(queue.some((file) => file.endsWith(".prompt")));
+    assert.equal(NodeFS.readFileSync(NodePath.join(state, "seq"), "utf8").trim(), "1");
+    const cleanup = bash([
+      'rm -f "$HOME/.t3-task/block"',
+      'echo > "$HOME/.t3-task/release"',
+      'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+    ]);
+    assert.equal(cleanup.status, 0, cleanup.stderr);
+  } finally {
+    NodeFS.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+it("reads a dead runner's state as failed and starts clean on the next turn", () => {
+  const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-task-"));
+  try {
+    const bin = NodePath.join(home, "bin");
+    NodeFS.mkdirSync(bin);
+    stubUnixTools(bin);
+    NodeFS.writeFileSync(NodePath.join(bin, "git"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    NodeFS.writeFileSync(
+      NodePath.join(bin, "npx"),
+      '#!/bin/sh\nprintf \'{"result":"%s"}\\n\' "$T3_TASK_PROMPT"\n',
+      { mode: 0o755 },
+    );
+    const state = NodePath.join(home, ".t3-task");
+    NodeFS.mkdirSync(NodePath.join(state, "runs", "1"), { recursive: true });
+    NodeFS.mkdirSync(NodePath.join(state, "queue"), { recursive: true });
+    // The sandbox was shut down mid-turn with a follow-up still queued.
+    const dead = NodeChildProcess.spawnSync("bash", ["-c", ":"], bashEnv(home));
+    NodeFS.writeFileSync(NodePath.join(state, "runner.alive"), "");
+    NodeFS.writeFileSync(NodePath.join(state, "runner.pid"), String(dead.pid));
+    NodeFS.writeFileSync(NodePath.join(state, "turn"), "1");
+    NodeFS.writeFileSync(NodePath.join(state, "runs", "1", "prompt"), "first");
+    NodeFS.writeFileSync(NodePath.join(state, "queue", "000002.prompt"), "stale");
+    const bash = (script: string) =>
+      NodeChildProcess.spawnSync("bash", ["-c", script], bashEnv(home));
+    const latest = bash(readTurnScript());
+    assert.deepStrictEqual(parseTurn({ exitCode: 0, output: latest.stdout }), {
+      thread: "failed",
+      run: { id: "turn-1", status: "failed" },
+      latestReply: "The sandbox stopped before this turn finished.",
+      pullRequestUrl: null,
+    });
+    const queued = bash(readTurnScript({ queued: 2 }));
+    assert.deepStrictEqual(parseTurn({ exitCode: 0, output: queued.stdout }, "queued-2"), {
+      thread: "failed",
+      run: { id: "queued-2", status: "failed" },
+      latestReply: "The sandbox stopped before this message ran. Send it again.",
+      pullRequestUrl: null,
+    });
+    assert.isFalse(chatIsRunning(bash(readChatScript()).stdout));
+    const started = bash(
+      [
+        'export PATH="$HOME/bin:$PATH"',
+        'export T3_TASK_PROMPT="next"',
+        agentTurnScript({ first: false }),
+        'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+      ].join("\n"),
+    );
+    assert.equal(started.status, 0, started.stderr);
+    assert.include(started.stdout, "turn=2");
+    // The dead turn is marked killed, the stale queue item dropped, the new one ran.
+    assert.equal(
+      NodeFS.readFileSync(NodePath.join(state, "runs", "1", "exit"), "utf8").trim(),
+      "137",
+    );
+    const queue = NodeFS.readdirSync(NodePath.join(state, "queue"));
+    assert.isFalse(queue.some((file) => file.endsWith(".prompt")));
+    assert.equal(NodeFS.readFileSync(NodePath.join(state, "turn"), "utf8").trim(), "2");
+    assert.include(
+      NodeFS.readFileSync(NodePath.join(state, "runs", "2", "out.jsonl"), "utf8"),
+      '{"result":"next"}',
+    );
   } finally {
     NodeFS.rmSync(home, { recursive: true, force: true });
   }
@@ -291,6 +436,35 @@ it("parses a turn's reply from stream-json, old output and a turn still running"
     thread: "failed",
     run: { id: "turn-6", status: "failed" },
     latestReply: "stream disconnected",
+    pullRequestUrl: null,
+  });
+  // A queued-N read reports pending while it waits, dropped once it can never run.
+  const waiting = ["turn=", "live=1", "exit=", "pending=1", "---", ""].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: waiting }, "queued-2"), {
+    thread: "queued",
+    run: { id: "queued-2", status: "queued" },
+    latestReply: null,
+    pullRequestUrl: null,
+  });
+  const dropped = ["turn=", "live=0", "exit=", "dropped=1", "---", ""].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: dropped }, "queued-2"), {
+    thread: "blocked",
+    run: { id: "queued-2", status: "cancelled" },
+    latestReply: "This message was cleared before it ran.",
+    pullRequestUrl: null,
+  });
+  const staleQueue = ["turn=", "live=0", "exit=", "pending=1", "---", ""].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: staleQueue }, "queued-2"), {
+    thread: "failed",
+    run: { id: "queued-2", status: "failed" },
+    latestReply: "The sandbox stopped before this message ran. Send it again.",
+    pullRequestUrl: null,
+  });
+  const diedMidTurn = ["turn=7", "live=0", "exit=", "---", ""].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: diedMidTurn }), {
+    thread: "failed",
+    run: { id: "turn-7", status: "failed" },
+    latestReply: "The sandbox stopped before this turn finished.",
     pullRequestUrl: null,
   });
 });

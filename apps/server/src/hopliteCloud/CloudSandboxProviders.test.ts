@@ -1,8 +1,8 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
+import type { CloudTaskChatEvent } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
@@ -46,6 +46,10 @@ interface HarnessOptions {
   readonly queued?: boolean;
   /** Daytona's sandbox is stopped until POST /start arrives. */
   readonly daytonaStopped?: boolean;
+  /** Daytona's execute endpoint fails even while the sandbox runs. */
+  readonly executeFails?: boolean;
+  /** The enqueue script refuses with the login-changed marker. */
+  readonly loginChanged?: boolean;
   /** Successive chat reads return these outputs, then the last one. */
   readonly chatOutputs?: ReadonlyArray<string>;
 }
@@ -61,6 +65,8 @@ const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {
     e2bError = false,
     queued = false,
     daytonaStopped = false,
+    executeFails = false,
+    loginChanged = false,
     chatOutputs = [],
   } = options;
   const stored = new Map<string, Uint8Array>();
@@ -96,11 +102,13 @@ const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {
       : reads
         ? readOutput
         : starts
-          ? queued
-            ? "queued"
-            : exitCode === 0
-              ? "turn=2"
-              : "fatal: repository not found"
+          ? loginChanged
+            ? "---t3-task-login-changed---"
+            : queued
+              ? "queued=2"
+              : exitCode === 0
+                ? "turn=2"
+                : "fatal: repository not found"
           : commandOutput;
     if (chats) chatReads += 1;
     if (url.host === "app.daytona.io" && url.pathname.endsWith("/signed-preview-url")) {
@@ -142,7 +150,7 @@ const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {
       case "POST proxy.app.daytona.io/toolbox/dsb-1/process/execute":
         if (request.headers.authorization !== `Bearer ${KEYS.daytona}`) return respond(401, {});
         if (route.endsWith("/execute")) {
-          if (daytonaState === "stopped") return respond(500, {});
+          if (daytonaState === "stopped" || executeFails) return respond(500, {});
           return respond(200, { exitCode, result: output });
         }
         if (route.endsWith("/start")) {
@@ -553,8 +561,47 @@ it.effect("queues a follow-up behind the turn still running", () => {
     yield* cloud.connect("daytona", KEYS.daytona);
     assert.deepStrictEqual(
       yield* cloud.sendMessage({ threadId: "daytona:dsb-1", message: "Also fix signup" }),
-      { runId: null },
+      { runId: "queued-2" },
     );
+    // The queued id reads back as the run the queue item became.
+    const read = yield* cloud.readTask({ threadId: "daytona:dsb-1", runId: "queued-2" });
+    assert.deepStrictEqual(read.run, { id: "queued-2", status: "completed" });
+    // The read asks for the queue item, not a finished turn.
+    assert.include(harness.sent.at(-1)!.body, "%06d");
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a follow-up against the login the task still runs on is refused", () => {
+  const harness = makeHarness(agentEnvironment, { turnExit: 3, loginChanged: true });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const error = yield* Effect.flip(
+      cloud.sendMessage({ threadId: "daytona:dsb-1", message: "More" }),
+    );
+    assert.equal(error.code, "unavailable");
+    assert.equal(
+      error.message,
+      "This task is still running on the login it started with. Stop it, then send your message again to use the new login.",
+    );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("keeps a credential it replaced or removed redacted in sandbox output", () => {
+  const replaced = "sk-ant-oat01-replaced-login";
+  const removed = "sk-ant-oat02-removed-login";
+  const harness = makeHarness(
+    {},
+    { readOutput: turnOutput(`ran on ${replaced}, then ${removed}`) },
+  );
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    yield* cloud.setAgentCredential("claude", replaced);
+    yield* cloud.setAgentCredential("claude", removed);
+    yield* cloud.clearAgentCredential("claude");
+    const read = yield* cloud.readTask({ threadId: "daytona:dsb-1" });
+    assert.equal(read.task.latestReply, "ran on [redacted], then [redacted]");
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -626,7 +673,7 @@ it.effect("previews the app a sandbox serves, each provider its own way", () => 
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect("starts a stopped Daytona sandbox and runs the command again", () => {
+it.effect("starts a stopped Daytona sandbox once, then runs the command once", () => {
   const harness = makeHarness(agentEnvironment, {
     daytonaStopped: true,
     commandOutput: "done",
@@ -639,8 +686,24 @@ it.effect("starts a stopped Daytona sandbox and runs the command again", () => {
       { exitCode: 0, output: "done" },
     );
     const executions = harness.sent.filter((request) => request.url.endsWith("/execute"));
-    assert.lengthOf(executions, 2);
-    assert.isTrue(harness.sent.some((request) => request.url.endsWith("/api/sandbox/dsb-1/start")));
+    assert.lengthOf(executions, 1);
+    const starts = harness.sent.filter((request) => request.url.endsWith("/dsb-1/start"));
+    assert.lengthOf(starts, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("does not retry a command that failed in a running Daytona sandbox", () => {
+  const harness = makeHarness(agentEnvironment, { executeFails: true });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    assert.equal(
+      yield* errorCode(cloud.runInSandbox({ sandboxId: "daytona:dsb-1", command: "ls" })),
+      "unavailable",
+    );
+    const executions = harness.sent.filter((request) => request.url.endsWith("/execute"));
+    assert.lengthOf(executions, 1);
+    assert.isFalse(harness.sent.some((request) => request.url.endsWith("/dsb-1/start")));
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -721,24 +784,35 @@ it.effect("a sandbox task's chat replays, follows activity and polls while it ru
     const cloud = yield* HopliteCloud.HopliteCloud;
     yield* cloud.connect("daytona", KEYS.daytona);
     const activity = yield* Queue.unbounded<void>();
-    const collected = yield* cloud
-      .watchThreadChat("daytona:dsb-1", Stream.fromQueue(activity))
-      .pipe(Stream.take(5), Stream.runCollect, Effect.forkChild);
-    yield* Queue.offer(activity, undefined);
-    yield* TestClock.adjust("3 seconds");
-    const events = [...(yield* Fiber.join(collected))];
-    assert.deepStrictEqual(
-      events.map((event) => event._tag),
-      ["replace", "live", "replace", "live", "live"],
+    // Triggers collapse into one pending refresh, so each phase is awaited before the
+    // next is offered; the events arrive through this queue.
+    const inbox = yield* Queue.unbounded<CloudTaskChatEvent>();
+    yield* cloud.watchThreadChat("daytona:dsb-1", Stream.fromQueue(activity)).pipe(
+      Stream.runForEach((event) => Queue.offer(inbox, event)),
+      Effect.forkChild,
     );
-    const [first, , second] = events;
-    assert.deepStrictEqual(first?._tag === "replace" ? first.entries : [], [
-      { _tag: "message", id: "turn-1-user", role: "user", text: "Fix login" },
-      { _tag: "message", id: "turn-1-1", role: "assistant", text: "Looking" },
-    ]);
-    const secondEntries = second?._tag === "replace" ? second.entries : [];
+    const first = yield* Queue.take(inbox);
+    assert.deepStrictEqual(first, {
+      _tag: "replace",
+      entries: [
+        { _tag: "message", id: "turn-1-user", role: "user", text: "Fix login" },
+        { _tag: "message", id: "turn-1-1", role: "assistant", text: "Looking" },
+      ],
+    });
+    assert.deepStrictEqual(yield* Queue.take(inbox), { _tag: "live", running: true });
+    yield* Queue.offer(activity, undefined);
+    const second = yield* Queue.take(inbox);
     // The chat output is redacted before it is parsed.
-    assert.deepInclude(secondEntries.at(-1), { text: "Still on [redacted]" });
-    assert.deepStrictEqual(events.at(-1), { _tag: "live", running: false });
+    assert.deepStrictEqual(second, {
+      _tag: "replace",
+      entries: [
+        { _tag: "message", id: "turn-1-user", role: "user", text: "Fix login" },
+        { _tag: "message", id: "turn-1-1", role: "assistant", text: "Looking" },
+        { _tag: "message", id: "turn-1-2", role: "assistant", text: "Still on [redacted]" },
+      ],
+    });
+    assert.deepStrictEqual(yield* Queue.take(inbox), { _tag: "live", running: true });
+    yield* TestClock.adjust("3 seconds");
+    assert.deepStrictEqual(yield* Queue.take(inbox), { _tag: "live", running: false });
   }).pipe(Effect.provide(harness.layer));
 });

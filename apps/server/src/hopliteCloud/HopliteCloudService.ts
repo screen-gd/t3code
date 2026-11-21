@@ -71,6 +71,11 @@ export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
 const CLAUDE_CREDENTIAL_SECRET = "cloud-sandbox-claude-credential";
 /** The OpenAI API key saved in Settings for Codex sandboxes. */
 const CODEX_CREDENTIAL_SECRET = "cloud-sandbox-codex-credential";
+/** Credentials a sandbox may still hold after they were replaced or removed here. */
+const RETIRED_CREDENTIALS_SECRET = "cloud-sandbox-retired-credentials";
+const RetiredCredentialsJson = Schema.fromJsonString(Schema.Array(Schema.String));
+const decodeRetiredCredentials = Schema.decodeOption(RetiredCredentialsJson);
+const MAX_RETIRED_CREDENTIALS = 20;
 const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = [
   "hoplite",
   "e2b",
@@ -500,14 +505,34 @@ const make = Effect.gen(function* () {
       githubToken,
     } satisfies AgentKeys;
   });
+  // A credential a sandbox may still hold after it was replaced or removed here; read
+  // fresh each time so a just-saved login redacts immediately.
+  const retiredCredentials = readSecret(RETIRED_CREDENTIALS_SECRET).pipe(
+    Effect.map((stored) =>
+      Option.getOrElse(Option.flatMap(stored, decodeRetiredCredentials), (): Array<string> => []),
+    ),
+    Effect.orElseSucceed((): Array<string> => []),
+  );
+  // Called before a stored key or credential is replaced or removed, so its old value
+  // keeps being redacted for as long as a sandbox could still carry it.
+  const retire = Effect.fn("HopliteCloud.retire")(function* (secretName: string) {
+    const saved = yield* readSecret(secretName);
+    if (saved._tag === "None") return;
+    const retired = yield* retiredCredentials;
+    yield* saveSecret(
+      RETIRED_CREDENTIALS_SECRET,
+      JSON.stringify([...new Set([saved.value, ...retired])].slice(0, MAX_RETIRED_CREDENTIALS)),
+    );
+  });
   // Every key a sandbox can hold, to keep out of anything that comes back from it.
   const sandboxSecrets = (apiKey: string) =>
-    Effect.all([claudeCredential, codexCredential]).pipe(
-      Effect.map(([claude, codex]) => [
+    Effect.all([claudeCredential, codexCredential, retiredCredentials]).pipe(
+      Effect.map(([claude, codex, retired]) => [
         apiKey,
         claude?.value,
         codex?.value,
         environment.GH_TOKEN || environment.GITHUB_TOKEN || undefined,
+        ...retired,
       ]),
     );
   const turnFailed = (
@@ -544,21 +569,30 @@ const make = Effect.gen(function* () {
     id: string,
     runId?: string,
   ) {
-    const turnNumber = runId === undefined ? undefined : /^turn-([1-9]\d{0,8})$/.exec(runId)?.[1];
-    if (runId !== undefined && turnNumber === undefined)
-      return yield* failure("not_found", provider);
+    // turn-N reads that turn; queued-N reads whichever run the queue item became.
+    const named = runId === undefined ? undefined : /^(turn|queued)-([1-9]\d{0,8})$/.exec(runId);
+    if (runId !== undefined && named === null) return yield* failure("not_found", provider);
     const apiKey = yield* keyFor(provider);
     const result = yield* sessionOf(provider).exec(
       apiKey,
       id,
-      readTurnScript(turnNumber === undefined ? undefined : Number(turnNumber)),
+      readTurnScript(
+        named === undefined || named === null
+          ? undefined
+          : named[1] === "queued"
+            ? { queued: Number(named[2]) }
+            : { turn: Number(named[2]) },
+      ),
       {},
     );
     // Redacted before parsing, so neither the reply's cut nor its link can split a key.
-    const turn = parseTurn({
-      ...result,
-      output: redact(result.output, yield* sandboxSecrets(apiKey)),
-    });
+    const turn = parseTurn(
+      {
+        ...result,
+        output: redact(result.output, yield* sandboxSecrets(apiKey)),
+      },
+      runId,
+    );
     return {
       task: {
         threadId: `${provider}:${id}`,
@@ -674,6 +708,7 @@ const make = Effect.gen(function* () {
   ) {
     // Check the key before saving it so a typo never replaces a working one.
     yield* verifyKey(provider, apiKey);
+    yield* retire(apiKeySecretFor(provider));
     yield* saveSecret(apiKeySecretFor(provider), apiKey);
     projectIds.clear();
     return yield* status;
@@ -682,6 +717,7 @@ const make = Effect.gen(function* () {
   const disconnect = Effect.fn("HopliteCloud.disconnect")(function* (
     provider: CloudSandboxProvider,
   ) {
+    yield* retire(apiKeySecretFor(provider));
     yield* removeSecret(apiKeySecretFor(provider));
     projectIds.clear();
     return yield* status;
@@ -691,6 +727,7 @@ const make = Effect.gen(function* () {
     agent: CloudSandboxAgent,
     credential: string,
   ) {
+    yield* retire(credentialSecretFor(agent));
     yield* saveSecret(credentialSecretFor(agent), credential);
     return yield* status;
   });
@@ -698,6 +735,7 @@ const make = Effect.gen(function* () {
   const clearAgentCredential = Effect.fn("HopliteCloud.clearAgentCredential")(function* (
     agent: CloudSandboxAgent,
   ) {
+    yield* retire(credentialSecretFor(agent));
     yield* removeSecret(credentialSecretFor(agent));
     return yield* status;
   });
@@ -942,8 +980,8 @@ const make = Effect.gen(function* () {
     return { task: toTask(thread, null), runId: run?.id ?? null } satisfies HopliteStartedTask;
   });
 
-  // While a turn still runs the message waits in the sandbox's queue and runId comes
-  // back null; HopliteTaskWatch then follows whichever run the queue starts next.
+  // While a turn still runs the message waits in the sandbox's queue and runId names
+  // its item (queued-N); a fresh run gets turn-N. A runner on a different login refuses.
   const sendSandboxMessage = Effect.fn("HopliteCloud.sendSandboxMessage")(function* (
     provider: SessionProvider,
     id: string,
@@ -968,6 +1006,13 @@ const make = Effect.gen(function* () {
       agentTurnEnv(keys, message, undefined, model),
     );
     if (ran.exitCode !== 0) {
+      if (ran.output.includes("---t3-task-login-changed---")) {
+        return yield* new HopliteCloudError({
+          code: "unavailable",
+          message:
+            "This task is still running on the login it started with. Stop it, then send your message again to use the new login.",
+        });
+      }
       return yield* turnFailed(provider, ran, yield* sandboxSecrets(apiKey));
     }
     return { runId: startedRunId(ran) };
@@ -1109,17 +1154,20 @@ const make = Effect.gen(function* () {
     Stream.callback((queue) =>
       Effect.gen(function* () {
         const apiKey = yield* keyFor(provider);
-        const secrets = yield* sandboxSecrets(apiKey);
-        const read = sessionOf(provider)
-          .exec(apiKey, id, readChatScript(), {})
-          .pipe(
-            Effect.map((result) => redact(result.output, secrets)),
-            Effect.map((output) => ({
-              entries: parseChat(output),
-              running: chatIsRunning(output),
-            })),
-          );
-        const trigger = yield* Queue.unbounded<void>();
+        // Secrets are redacted per read, so a credential saved mid-watch redacts too.
+        const read = Effect.flatMap(sandboxSecrets(apiKey), (secrets) =>
+          sessionOf(provider)
+            .exec(apiKey, id, readChatScript(), {})
+            .pipe(
+              Effect.map((result) => redact(result.output, secrets)),
+              Effect.map((output) => ({
+                entries: parseChat(output),
+                running: chatIsRunning(output),
+              })),
+            ),
+        );
+        // Bursts of activity collapse into at most one pending refresh.
+        const trigger = yield* Queue.dropping<void>(1);
         const running = yield* Ref.make(true);
         yield* Effect.forkChild(Stream.runForEach(activity, () => Queue.offer(trigger, undefined)));
         // While the task's runner is alive, a tick asks for the same read activity does.

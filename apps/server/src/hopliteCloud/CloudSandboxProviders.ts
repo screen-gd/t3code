@@ -271,16 +271,28 @@ const makeDaytona = ({ send, failure }: Deps): SessionAdapter => {
       DaytonaSandbox,
     );
 
-  // Creation and start can return before the sandbox runs; commands fail until it does.
-  const waitStarted = Effect.fn("CloudSandbox.daytona.waitStarted")(function* (
+  // Creation, start and restore can return before the sandbox runs; commands fail until
+  // it does. A stopped or archived one gets a single start request, then the same wait.
+  const ensureStarted = Effect.fn("CloudSandbox.daytona.ensureStarted")(function* (
     apiKey: string,
     id: string,
   ) {
+    let asked = false;
     for (let attempt = 0; attempt < 60; attempt++) {
       const sandbox = yield* sandboxOf(apiKey, id);
       if (sandbox!.state === "started") return;
       if (sandbox!.state === "error" || sandbox!.state === "build_failed")
         return yield* failure("daytona", "unavailable");
+      if ((sandbox!.state === "stopped" || sandbox!.state === "archived") && !asked) {
+        asked = true;
+        yield* send(
+          "daytona",
+          apiKey,
+          HttpClientRequest.post(`${DAYTONA_API_BASE_URL}/sandbox/${id}/start`),
+          null,
+        );
+        continue;
+      }
       yield* Effect.sleep("2 seconds");
     }
     return yield* failure("daytona", "unavailable");
@@ -324,30 +336,12 @@ const makeDaytona = ({ send, failure }: Deps): SessionAdapter => {
         ),
         DaytonaSandbox,
       );
-      yield* waitStarted(apiKey, created!.id);
+      yield* ensureStarted(apiKey, created!.id);
       return created!.id;
     }),
+    // The command runs exactly once, so a retried sandbox never replays its side effects.
     exec: (apiKey, id, command, envs) =>
-      execute(apiKey, id, command, envs).pipe(
-        // A stopped or archived sandbox answers with a proxy error; start it and try once more.
-        Effect.catchIf(
-          (error) => error.code !== "invalid_key" && error.code !== "forbidden",
-          (error) =>
-            Effect.gen(function* () {
-              const sandbox = yield* sandboxOf(apiKey, id);
-              if (sandbox!.state !== "stopped" && sandbox!.state !== "archived")
-                return yield* error;
-              yield* send(
-                "daytona",
-                apiKey,
-                HttpClientRequest.post(`${DAYTONA_API_BASE_URL}/sandbox/${id}/start`),
-                null,
-              );
-              yield* waitStarted(apiKey, id);
-              return yield* execute(apiKey, id, command, envs);
-            }),
-        ),
-      ),
+      ensureStarted(apiKey, id).pipe(Effect.andThen(execute(apiKey, id, command, envs))),
     preview: (apiKey, id, port) =>
       send(
         "daytona",
