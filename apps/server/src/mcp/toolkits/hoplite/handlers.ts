@@ -29,7 +29,18 @@ const callerThreadId = Effect.map(
 const handlers = {
   // These spend the controller's provider keys, so read-only clients and linked environments may not.
   cloud_task: McpToolAccess.writesWithCapability(
-    ({ threadId, questionId, prompt, provider, model, title, repo, template, clientRequestId }) =>
+    ({
+      threadId,
+      questionId,
+      prompt,
+      provider,
+      model,
+      title,
+      repo,
+      template,
+      agent,
+      clientRequestId,
+    }) =>
       questionId !== undefined && threadId === undefined
         ? Effect.fail(
             new OrchestratorMcpFailure({
@@ -48,6 +59,7 @@ const handlers = {
                       ...(title === undefined ? {} : { title }),
                       ...(repo === undefined ? {} : { repo }),
                       ...(template === undefined ? {} : { template }),
+                      ...(agent === undefined ? {} : { agent }),
                       ...(clientRequestId === undefined ? {} : { clientRequestId }),
                     },
                     caller,

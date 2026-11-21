@@ -2813,10 +2813,10 @@ export const layerWsRpc = (
           hopliteCloud.connect(input.provider ?? "hoplite", input.apiKey),
         [WS_METHODS.hopliteCloudDisconnect]: (input) =>
           hopliteCloud.disconnect(input.provider ?? "hoplite"),
-        [WS_METHODS.hopliteCloudSetClaudeCredential]: (input) =>
-          hopliteCloud.setClaudeCredential(input.credential),
-        [WS_METHODS.hopliteCloudClearClaudeCredential]: (_input) =>
-          hopliteCloud.clearClaudeCredential,
+        [WS_METHODS.hopliteCloudSetAgentCredential]: (input) =>
+          hopliteCloud.setAgentCredential(input.agent, input.credential),
+        [WS_METHODS.hopliteCloudClearAgentCredential]: (input) =>
+          hopliteCloud.clearAgentCredential(input.agent),
         [WS_METHODS.hopliteCloudWatchTaskChat]: (input) =>
           watchTaskChat(
             {

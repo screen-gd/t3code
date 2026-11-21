@@ -20,6 +20,8 @@ const RUNNER_SCRIPT = `\
 STATE_DIR="${STATE_DIR}"
 cd "$HOME/work" || exit 1
 command -v flock >/dev/null 2>&1 || flock() { :; }
+agent=$(cat "$STATE_DIR/agent" 2>/dev/null || true)
+[ -z "$agent" ] && agent=claude
 while :; do
   turn=$(
     exec 9>"$STATE_DIR/lock"
@@ -41,11 +43,17 @@ while :; do
   [ -z "$turn" ] && break
   state="$STATE_DIR/runs/$turn"
   args=()
-  [ "$turn" -gt 1 ] && args+=(-c)
-  [ -s "$state/model" ] && args+=(--model "$(cat "$state/model")")
   T3_TASK_PROMPT="$(cat "$state/prompt")"
   export T3_TASK_PROMPT
-  npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" "\${args[@]}" --dangerously-skip-permissions --output-format stream-json --verbose > "$state/out.jsonl" 2> "$state/err.log"
+  if [ "$agent" = "codex" ]; then
+    [ -s "$state/model" ] && args+=(-m "$(cat "$state/model")")
+    [ "$turn" -gt 1 ] && args+=(resume --last)
+    npx -y @openai/codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "\${args[@]}" "$T3_TASK_PROMPT" > "$state/out.jsonl" 2> "$state/err.log"
+  else
+    [ "$turn" -gt 1 ] && args+=(-c)
+    [ -s "$state/model" ] && args+=(--model "$(cat "$state/model")")
+    npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" "\${args[@]}" --dangerously-skip-permissions --output-format stream-json --verbose > "$state/out.jsonl" 2> "$state/err.log"
+  fi
   code=$?
   (
     exec 9>"$STATE_DIR/lock"
@@ -68,6 +76,7 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
     ...(input.first
       ? [
           'if [ -n "$T3_TASK_REPO" ] && [ ! -d "$HOME/work/.git" ]; then git clone "https://github.com/$T3_TASK_REPO.git" "$HOME/work"; fi',
+          `if [ ! -f "${STATE_DIR}/agent" ]; then printf '%s' "\${T3_TASK_AGENT:-claude}" > "${STATE_DIR}/agent"; fi`,
         ]
       : []),
     'mkdir -p "$HOME/work"',
@@ -109,10 +118,11 @@ export const agentTurnEnv = (
   repo: string | undefined,
   model?: string,
 ): Record<string, string> => ({
-  [keys.claude.variable]: keys.claude.value,
+  [keys.agent.variable]: keys.agent.value,
   ...(keys.githubToken === undefined
     ? {}
     : { GH_TOKEN: keys.githubToken, GITHUB_TOKEN: keys.githubToken }),
+  T3_TASK_AGENT: keys.agent.name,
   T3_TASK_PROMPT: prompt,
   ...(repo === undefined ? {} : { T3_TASK_REPO: repo }),
   ...(model === undefined ? {} : { T3_TASK_MODEL: model }),
@@ -213,6 +223,44 @@ const toolTitle = (block: Record<string, unknown>) => {
   return detail === null ? name : `${name}: ${detail.split("\n", 1)[0]!.slice(0, 80)}`;
 };
 
+// Codex's stream-json calls work items instead of tool blocks; title each the same way.
+const codexToolTitle = (item: Record<string, unknown>) => {
+  switch (item.type) {
+    case "command_execution":
+      return typeof item.command === "string"
+        ? `Bash: ${item.command.split("\n", 1)[0]!.slice(0, 80)}`
+        : "Bash";
+    case "file_change": {
+      const changes = Array.isArray(item.changes) ? item.changes : [];
+      const first =
+        isRecord(changes[0]) && typeof changes[0].path === "string" ? changes[0].path : undefined;
+      if (first === undefined) return "Edit";
+      return changes.length > 1 ? `Edit: ${first} (+${changes.length - 1} more)` : `Edit: ${first}`;
+    }
+    case "mcp_tool_call": {
+      const server = typeof item.server === "string" ? item.server : "mcp";
+      const tool = typeof item.tool === "string" ? item.tool : "call";
+      return `${server}.${tool}`;
+    }
+    case "web_search":
+      return typeof item.query === "string" ? `Search: ${item.query}` : "Search";
+    default:
+      return "Tool";
+  }
+};
+
+const codexToolStatus = (item: Record<string, unknown>, completed: boolean) => {
+  if (!completed) return "in_progress" as const;
+  if (item.status === "failed" || item.status === "declined") return "failed" as const;
+  if (
+    item.type === "command_execution" &&
+    typeof item.exit_code === "number" &&
+    item.exit_code !== 0
+  )
+    return "failed" as const;
+  return "completed" as const;
+};
+
 /**
  * The chat readChatScript prints, as entries: each turn's prompt, assistant text and
  * tool calls. A tool stays in_progress until its tool_result, or failed when the turn
@@ -292,6 +340,70 @@ export const parseChat = (output: string): Array<CloudTaskChatEntry> => {
             entries[at] = { ...entry, status: block.is_error === true ? "failed" : "completed" };
             pending.delete(at);
           }
+        } else if (
+          event.type === "item.started" ||
+          event.type === "item.updated" ||
+          event.type === "item.completed"
+        ) {
+          const item = event.item;
+          if (!isRecord(item) || typeof item.id !== "string") continue;
+          const done = event.type === "item.completed";
+          if (item.type === "agent_message") {
+            if (done && typeof item.text === "string" && item.text !== "") {
+              entries.push({
+                _tag: "message",
+                id: `turn-${turn.turn}-${(index += 1)}`,
+                role: "assistant",
+                text: item.text,
+              });
+            }
+          } else if (item.type === "error") {
+            if (typeof item.message === "string" && item.message !== "") {
+              entries.push({
+                _tag: "message",
+                id: `turn-${turn.turn}-${(index += 1)}`,
+                role: "assistant",
+                text: item.message,
+              });
+            }
+          } else if (
+            item.type === "command_execution" ||
+            item.type === "file_change" ||
+            item.type === "mcp_tool_call" ||
+            item.type === "web_search"
+          ) {
+            const status = codexToolStatus(item, done);
+            const at = tools.get(item.id);
+            if (at === undefined) {
+              tools.set(item.id, entries.length);
+              if (!done) pending.add(entries.length);
+              entries.push({
+                _tag: "tool",
+                id: item.id,
+                title: codexToolTitle(item),
+                status,
+              });
+            } else {
+              const entry = entries[at];
+              if (entry?._tag === "tool") entries[at] = { ...entry, status };
+              if (done) pending.delete(at);
+            }
+          }
+        } else if (event.type === "turn.failed" || event.type === "error") {
+          const message =
+            isRecord(event.error) && typeof event.error.message === "string"
+              ? event.error.message
+              : typeof event.message === "string"
+                ? event.message
+                : null;
+          if (message !== null && message !== "") {
+            entries.push({
+              _tag: "message",
+              id: `turn-${turn.turn}-${(index += 1)}`,
+              role: "assistant",
+              text: message,
+            });
+          }
         }
       }
     } else {
@@ -351,6 +463,18 @@ export const parseTurn = (result: CommandResult): TurnState => {
       if (event.type === "assistant") {
         const text = messageText(event);
         if (text !== null) lastAssistant = text;
+      }
+      // Codex names the same moments differently: its reply is the last agent_message
+      // once its turn completed, or the failure's message when it did not.
+      if (event.type === "item.completed") {
+        const item = event.item;
+        if (isRecord(item) && item.type === "agent_message" && typeof item.text === "string")
+          lastAssistant = item.text;
+      }
+      if (event.type === "turn.completed") settled = lastAssistant;
+      if (event.type === "turn.failed") {
+        const error = event.error;
+        if (isRecord(error) && typeof error.message === "string") settled = error.message;
       }
     }
   }

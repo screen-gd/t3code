@@ -180,6 +180,8 @@ const errorCode = <A, E extends { readonly code: string }, R>(effect: Effect.Eff
     Effect.map((error) => error.code),
   );
 
+const CODEX_KEY = "sk-codex-secret";
+const OPENAI_KEY = "sk-openai-secret";
 const agentEnvironment = { ANTHROPIC_API_KEY: ANTHROPIC_KEY, GH_TOKEN: GITHUB_TOKEN };
 
 it.effect.each([
@@ -345,7 +347,7 @@ it.effect.each(claudeKeyCases)("%s", ([, options]) => {
   return Effect.gen(function* () {
     const cloud = yield* HopliteCloud.HopliteCloud;
     yield* cloud.connect("daytona", KEYS.daytona);
-    if (options.saved !== undefined) yield* cloud.setClaudeCredential(options.saved);
+    if (options.saved !== undefined) yield* cloud.setAgentCredential("claude", options.saved);
     const status = yield* cloud.status;
     assert.deepInclude(status, { claude: options.statusClaude ?? null });
     yield* cloud.startTask({ provider: "daytona", prompt: "Fix", repo: "acme/web" });
@@ -359,6 +361,149 @@ it.effect.each(claudeKeyCases)("%s", ([, options]) => {
       const ran = yield* cloud.runInSandbox({ sandboxId: "daytona:dsb-1", command: "env" });
       assert.equal(ran.output, options.envOutput);
     }
+  }).pipe(Effect.provide(harness.layer));
+});
+
+interface CodexKeyCase {
+  readonly environment: NodeJS.ProcessEnv;
+  /** Saved through setAgentCredential("codex") before the task starts. */
+  readonly saved?: string;
+  /** The value the turn's CODEX_API_KEY env var should carry. */
+  readonly codexValue: string;
+  readonly statusCodex?: { readonly source: "settings" | "environment"; readonly kind: "api_key" };
+}
+
+const codexKeyCases: ReadonlyArray<readonly [name: string, options: CodexKeyCase]> = [
+  [
+    "runs Codex on CODEX_API_KEY where T3 Code runs",
+    {
+      environment: { CODEX_API_KEY: CODEX_KEY },
+      codexValue: CODEX_KEY,
+      statusCodex: { source: "environment", kind: "api_key" },
+    },
+  ],
+  [
+    "falls back to OPENAI_API_KEY for Codex",
+    {
+      environment: { OPENAI_API_KEY: OPENAI_KEY },
+      codexValue: OPENAI_KEY,
+      statusCodex: { source: "environment", kind: "api_key" },
+    },
+  ],
+  [
+    "prefers CODEX_API_KEY over OPENAI_API_KEY",
+    {
+      environment: { CODEX_API_KEY: CODEX_KEY, OPENAI_API_KEY: OPENAI_KEY },
+      codexValue: CODEX_KEY,
+      statusCodex: { source: "environment", kind: "api_key" },
+    },
+  ],
+  [
+    "prefers an OpenAI key saved in Settings over the environment",
+    {
+      environment: { CODEX_API_KEY: CODEX_KEY },
+      saved: "sk-codex-saved",
+      codexValue: "sk-codex-saved",
+      statusCodex: { source: "settings", kind: "api_key" },
+    },
+  ],
+];
+
+it.effect.each(codexKeyCases)("%s", ([, options]) => {
+  const harness = makeHarness(options.environment);
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    if (options.saved !== undefined) yield* cloud.setAgentCredential("codex", options.saved);
+    const status = yield* cloud.status;
+    assert.deepInclude(status, { codex: options.statusCodex ?? null });
+    yield* cloud.startTask({
+      provider: "daytona",
+      prompt: "Fix",
+      repo: "acme/web",
+      agent: "codex",
+    });
+    const turn = harness.sent.find((request) =>
+      request.body.includes("--dangerously-bypass-approvals-and-sandbox"),
+    );
+    assert.isDefined(turn);
+    const envs = JSON.parse(turn!.body).envs as Record<string, string>;
+    // Codex's key goes in under its own name, never Claude's credentials.
+    assert.equal(envs.CODEX_API_KEY, options.codexValue);
+    assert.equal(envs.T3_TASK_AGENT, "codex");
+    assert.isUndefined(envs.ANTHROPIC_API_KEY);
+    assert.isUndefined(envs.CLAUDE_CODE_OAUTH_TOKEN);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("asks for an OpenAI key before creating a sandbox for a codex task", () => {
+  const harness = makeHarness({ ANTHROPIC_API_KEY: ANTHROPIC_KEY });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const before = harness.sent.length;
+    const error = yield* Effect.flip(
+      cloud.startTask({
+        provider: "daytona",
+        prompt: "Fix",
+        repo: "acme/web",
+        agent: "codex",
+      }),
+    );
+    assert.equal(error.code, "not_connected");
+    assert.include(error.message, "Codex");
+    assert.equal(harness.sent.length, before);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a codex task's follow-up signs in as codex again", () => {
+  // The follow-up asks the sandbox which agent it runs before picking keys.
+  const harness = makeHarness(
+    { ANTHROPIC_API_KEY: ANTHROPIC_KEY, CODEX_API_KEY: CODEX_KEY },
+    { commandOutput: "codex" },
+  );
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    yield* cloud.sendMessage({ threadId: "daytona:dsb-1", message: "Also fix signup" });
+    const turn = harness.sent.find((request) =>
+      request.body.includes("--dangerously-bypass-approvals-and-sandbox"),
+    );
+    assert.isDefined(turn);
+    const envs = JSON.parse(turn!.body).envs as Record<string, string>;
+    assert.equal(envs.CODEX_API_KEY, CODEX_KEY);
+    assert.isUndefined(envs.ANTHROPIC_API_KEY);
+    // A sandbox whose file is missing or wrong still counts as claude.
+    const named = harness.sent.find((request) => request.body.includes(".t3-task/agent"));
+    assert.isDefined(named);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a follow-up without an agent file signs in as claude", () => {
+  const harness = makeHarness({ ANTHROPIC_API_KEY: ANTHROPIC_KEY, CODEX_API_KEY: CODEX_KEY });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    yield* cloud.sendMessage({ threadId: "daytona:dsb-1", message: "More" });
+    const turn = harness.sent.find((request) =>
+      request.body.includes("--dangerously-skip-permissions"),
+    );
+    const envs = JSON.parse(turn!.body).envs as Record<string, string>;
+    assert.equal(envs.ANTHROPIC_API_KEY, ANTHROPIC_KEY);
+    assert.isUndefined(envs.CODEX_API_KEY);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("hides the codex key from commands run in a task's sandbox", () => {
+  const harness = makeHarness(
+    { CODEX_API_KEY: CODEX_KEY },
+    { commandOutput: `CODEX_API_KEY=${CODEX_KEY}` },
+  );
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    const ran = yield* cloud.runInSandbox({ sandboxId: "daytona:dsb-1", command: "env" });
+    assert.equal(ran.output, "CODEX_API_KEY=[redacted]");
   }).pipe(Effect.provide(harness.layer));
 });
 

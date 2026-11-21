@@ -1,4 +1,5 @@
 import type {
+  CloudSandboxAgent,
   CloudSandboxProvider,
   HopliteCloudError,
   HopliteCloudErrorCode,
@@ -44,9 +45,10 @@ export const providerOfTask = (
 
 /** What goes into a sandbox so the agent there can work: never logged or returned. */
 export interface AgentKeys {
-  /** The one credential Claude Code in the sandbox signs in with, under the variable it reads. */
-  readonly claude: {
-    readonly variable: "ANTHROPIC_API_KEY" | "CLAUDE_CODE_OAUTH_TOKEN";
+  /** The one credential the sandbox's agent signs in with, under the variable it reads. */
+  readonly agent: {
+    readonly name: CloudSandboxAgent;
+    readonly variable: "ANTHROPIC_API_KEY" | "CLAUDE_CODE_OAUTH_TOKEN" | "CODEX_API_KEY";
     readonly value: string;
   };
   readonly githubToken: string | undefined;

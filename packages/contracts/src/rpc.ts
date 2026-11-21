@@ -439,12 +439,12 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
-  HopliteCloudClearClaudeCredentialInput,
+  HopliteCloudClearAgentCredentialInput,
   HopliteCloudConnectInput,
   CloudTaskChatEvent,
   HopliteCloudDisconnectInput,
   HopliteCloudError,
-  HopliteCloudSetClaudeCredentialInput,
+  HopliteCloudSetAgentCredentialInput,
   HopliteCloudStatus,
   HopliteCloudWatchTaskChatInput,
   HopliteCloudSendTaskMessageInput,
@@ -643,8 +643,8 @@ export const WS_METHODS = {
   hopliteCloudGetStatus: "hopliteCloud.getStatus",
   hopliteCloudConnect: "hopliteCloud.connect",
   hopliteCloudDisconnect: "hopliteCloud.disconnect",
-  hopliteCloudSetClaudeCredential: "hopliteCloud.setClaudeCredential",
-  hopliteCloudClearClaudeCredential: "hopliteCloud.clearClaudeCredential",
+  hopliteCloudSetAgentCredential: "hopliteCloud.setAgentCredential",
+  hopliteCloudClearAgentCredential: "hopliteCloud.clearAgentCredential",
   hopliteCloudWatchTaskChat: "hopliteCloud.watchTaskChat",
   hopliteCloudSendTaskMessage: "hopliteCloud.sendTaskMessage",
   hopliteCloudStopTask: "hopliteCloud.stopTask",
@@ -1211,16 +1211,16 @@ const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, 
   error: HopliteCloudRpcError,
 });
 
-const WsHopliteCloudSetClaudeCredentialRpc = Rpc.make(WS_METHODS.hopliteCloudSetClaudeCredential, {
-  payload: HopliteCloudSetClaudeCredentialInput,
+const WsHopliteCloudSetAgentCredentialRpc = Rpc.make(WS_METHODS.hopliteCloudSetAgentCredential, {
+  payload: HopliteCloudSetAgentCredentialInput,
   success: HopliteCloudStatus,
   error: HopliteCloudRpcError,
 });
 
-const WsHopliteCloudClearClaudeCredentialRpc = Rpc.make(
-  WS_METHODS.hopliteCloudClearClaudeCredential,
+const WsHopliteCloudClearAgentCredentialRpc = Rpc.make(
+  WS_METHODS.hopliteCloudClearAgentCredential,
   {
-    payload: HopliteCloudClearClaudeCredentialInput,
+    payload: HopliteCloudClearAgentCredentialInput,
     success: HopliteCloudStatus,
     error: HopliteCloudRpcError,
   },
@@ -2538,8 +2538,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsHopliteCloudGetStatusRpc,
   WsHopliteCloudConnectRpc,
   WsHopliteCloudDisconnectRpc,
-  WsHopliteCloudSetClaudeCredentialRpc,
-  WsHopliteCloudClearClaudeCredentialRpc,
+  WsHopliteCloudSetAgentCredentialRpc,
+  WsHopliteCloudClearAgentCredentialRpc,
   WsHopliteCloudWatchTaskChatRpc,
   WsHopliteCloudSendTaskMessageRpc,
   WsHopliteCloudStopTaskRpc,

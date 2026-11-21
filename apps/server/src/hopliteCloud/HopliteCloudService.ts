@@ -1,5 +1,6 @@
 import {
   type CloudSandbox,
+  type CloudSandboxAgent,
   type CloudSandboxCreateInput,
   type CloudSandboxIdInput,
   type CloudSandboxProvider,
@@ -68,6 +69,8 @@ export const HOPLITE_API_BASE_URL = "https://api.hoplite.sh";
 export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
 /** The Claude login saved in Settings, which wins over this machine's environment. */
 const CLAUDE_CREDENTIAL_SECRET = "cloud-sandbox-claude-credential";
+/** The OpenAI API key saved in Settings for Codex sandboxes. */
+const CODEX_CREDENTIAL_SECRET = "cloud-sandbox-codex-credential";
 const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = [
   "hoplite",
   "e2b",
@@ -211,11 +214,14 @@ export class HopliteCloud extends Context.Service<
     readonly disconnect: (
       provider: CloudSandboxProvider,
     ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
-    /** Saves the Claude login sandbox agents use, replacing any saved before. */
-    readonly setClaudeCredential: (
+    /** Saves the login the given sandbox agent uses, replacing any saved before. */
+    readonly setAgentCredential: (
+      agent: CloudSandboxAgent,
       credential: string,
     ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
-    readonly clearClaudeCredential: Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
+    readonly clearAgentCredential: (
+      agent: CloudSandboxAgent,
+    ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly startTask: (
       input: HopliteCloudStartTaskInput,
     ) => Effect.Effect<HopliteStartedTask, HopliteCloudError>;
@@ -429,7 +435,7 @@ const make = Effect.gen(function* () {
   });
   const sessionOf = (provider: SessionProvider) => sessions[provider];
   // `claude setup-token` makes `sk-ant-oat` tokens; anything else is taken as an API key.
-  const claudeVariable = (value: string): AgentKeys["claude"]["variable"] =>
+  const claudeVariable = (value: string): AgentKeys["agent"]["variable"] =>
     value.startsWith("sk-ant-oat") ? "CLAUDE_CODE_OAUTH_TOKEN" : "ANTHROPIC_API_KEY";
   // The agent in a sandbox signs in with the Claude login saved in Settings, else this
   // machine's Claude env vars; as in Claude Code, the API key wins when both are set.
@@ -456,30 +462,53 @@ const make = Effect.gen(function* () {
       };
     return undefined;
   });
-  const agentKeys = Effect.fn("HopliteCloud.agentKeys")(function* () {
-    const credential = yield* claudeCredential;
+  // Codex takes an API key only: the saved one, else this machine's Codex or OpenAI env var.
+  const codexCredential = Effect.map(readSecret(CODEX_CREDENTIAL_SECRET), (saved) => {
+    if (saved._tag === "Some")
+      return {
+        source: "settings" as const,
+        value: saved.value,
+        variable: "CODEX_API_KEY" as const,
+      };
+    const apiKey = environment.CODEX_API_KEY || environment.OPENAI_API_KEY || undefined;
+    if (apiKey !== undefined)
+      return {
+        source: "environment" as const,
+        value: apiKey,
+        variable: "CODEX_API_KEY" as const,
+      };
+    return undefined;
+  });
+  const credentialSecretFor = (agent: CloudSandboxAgent) =>
+    agent === "codex" ? CODEX_CREDENTIAL_SECRET : CLAUDE_CREDENTIAL_SECRET;
+  const credentialFor = (agent: CloudSandboxAgent) =>
+    agent === "codex" ? codexCredential : claudeCredential;
+  const agentKeys = Effect.fn("HopliteCloud.agentKeys")(function* (agent: CloudSandboxAgent) {
+    const credential = yield* credentialFor(agent);
     if (credential === undefined) {
       return yield* new HopliteCloudError({
         code: "not_connected",
         message:
-          "Add a Claude login in Settings > Environments (an API key, or a token from `claude setup-token` to use a Claude subscription), or set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN where T3 Code runs: the agent in the sandbox runs Claude Code on it.",
+          agent === "codex"
+            ? "Add an OpenAI API key under Codex for sandboxes in Settings > Environments, or set CODEX_API_KEY or OPENAI_API_KEY where T3 Code runs."
+            : "Add a Claude login in Settings > Environments (an API key, or a token from `claude setup-token` to use a Claude subscription), or set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN where T3 Code runs: the agent in the sandbox runs Claude Code on it.",
       });
     }
     const githubToken = environment.GH_TOKEN || environment.GITHUB_TOKEN || undefined;
     return {
-      claude: { variable: credential.variable, value: credential.value },
+      agent: { name: agent, variable: credential.variable, value: credential.value },
       githubToken,
     } satisfies AgentKeys;
   });
   // Every key a sandbox can hold, to keep out of anything that comes back from it.
   const sandboxSecrets = (apiKey: string) =>
-    Effect.option(agentKeys()).pipe(
-      Effect.map(
-        Option.match({
-          onNone: () => [apiKey],
-          onSome: (agent) => [apiKey, agent.claude.value, agent.githubToken],
-        }),
-      ),
+    Effect.all([claudeCredential, codexCredential]).pipe(
+      Effect.map(([claude, codex]) => [
+        apiKey,
+        claude?.value,
+        codex?.value,
+        environment.GH_TOKEN || environment.GITHUB_TOKEN || undefined,
+      ]),
     );
   const turnFailed = (
     provider: SessionProvider,
@@ -628,10 +657,13 @@ const make = Effect.gen(function* () {
                 : ("api_key" as const),
           },
     ),
+    Effect.map(codexCredential, (credential) =>
+      credential === undefined ? null : { source: credential.source, kind: "api_key" as const },
+    ),
   ]).pipe(
-    Effect.map(([providers, claude]): HopliteCloudStatus => {
+    Effect.map(([providers, claude, codex]): HopliteCloudStatus => {
       const hoplite = providers.find((entry) => entry.provider === "hoplite")!;
-      return { connected: hoplite.connected, problem: hoplite.problem, providers, claude };
+      return { connected: hoplite.connected, problem: hoplite.problem, providers, claude, codex };
     }),
     Effect.withSpan("HopliteCloud.status"),
   );
@@ -655,17 +687,20 @@ const make = Effect.gen(function* () {
     return yield* status;
   });
 
-  const setClaudeCredential = Effect.fn("HopliteCloud.setClaudeCredential")(function* (
+  const setAgentCredential = Effect.fn("HopliteCloud.setAgentCredential")(function* (
+    agent: CloudSandboxAgent,
     credential: string,
   ) {
-    yield* saveSecret(CLAUDE_CREDENTIAL_SECRET, credential);
+    yield* saveSecret(credentialSecretFor(agent), credential);
     return yield* status;
   });
 
-  const clearClaudeCredential = removeSecret(CLAUDE_CREDENTIAL_SECRET).pipe(
-    Effect.andThen(status),
-    Effect.withSpan("HopliteCloud.clearClaudeCredential"),
-  );
+  const clearAgentCredential = Effect.fn("HopliteCloud.clearAgentCredential")(function* (
+    agent: CloudSandboxAgent,
+  ) {
+    yield* removeSecret(credentialSecretFor(agent));
+    return yield* status;
+  });
 
   const storedProviders = Effect.filter(CLOUD_SANDBOX_PROVIDERS, (provider) =>
     readSecret(apiKeySecretFor(provider)).pipe(
@@ -801,7 +836,8 @@ const make = Effect.gen(function* () {
     provider: SessionProvider,
     input: HopliteCloudStartTaskInput,
   ) {
-    const keys = yield* agentKeys();
+    const agent = input.agent ?? "claude";
+    const keys = yield* agentKeys(agent);
     const apiKey = yield* keyFor(provider);
     const adapter = sessionOf(provider);
     const id = yield* adapter.create(apiKey, input.template);
@@ -817,7 +853,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.tapError(() => removeSandbox));
     if (started.exitCode !== 0) {
       yield* removeSandbox;
-      return yield* turnFailed(provider, started, [apiKey, keys.claude.value, keys.githubToken]);
+      return yield* turnFailed(provider, started, yield* sandboxSecrets(apiKey));
     }
     return {
       task: {
@@ -850,6 +886,7 @@ const make = Effect.gen(function* () {
               input.title ?? "",
               input.model ?? "",
               input.template ?? "",
+              input.agent ?? "",
             ].join("\u0000"),
         startSandboxTask(provider, input),
       );
@@ -858,6 +895,12 @@ const make = Effect.gen(function* () {
       return yield* new HopliteCloudError({
         code: "unsupported",
         message: "Hoplite tasks run on Hoplite's own machines; leave `template` out.",
+      });
+    }
+    if (input.agent !== undefined) {
+      return yield* new HopliteCloudError({
+        code: "unsupported",
+        message: "Hoplite runs its own agent; leave `agent` out.",
       });
     }
     const apiKey = yield* requireKey;
@@ -907,16 +950,25 @@ const make = Effect.gen(function* () {
     message: string,
     model: string | undefined,
   ) {
-    const keys = yield* agentKeys();
     const apiKey = yield* keyFor(provider);
-    const ran = yield* sessionOf(provider).exec(
+    const adapter = sessionOf(provider);
+    // The task's own file names its agent: sandboxes from before agents existed read as claude.
+    const named = yield* adapter.exec(
+      apiKey,
+      id,
+      'cat "$HOME/.t3-task/agent" 2>/dev/null || echo claude',
+      {},
+    );
+    const agent: CloudSandboxAgent = named.output.trim() === "codex" ? "codex" : "claude";
+    const keys = yield* agentKeys(agent);
+    const ran = yield* adapter.exec(
       apiKey,
       id,
       agentTurnScript({ first: false }),
       agentTurnEnv(keys, message, undefined, model),
     );
     if (ran.exitCode !== 0) {
-      return yield* turnFailed(provider, ran, [apiKey, keys.claude.value, keys.githubToken]);
+      return yield* turnFailed(provider, ran, yield* sandboxSecrets(apiKey));
     }
     return { runId: startedRunId(ran) };
   });
@@ -1187,8 +1239,8 @@ const make = Effect.gen(function* () {
     connected,
     connect,
     disconnect,
-    setClaudeCredential,
-    clearClaudeCredential,
+    setAgentCredential,
+    clearAgentCredential,
     startTask,
     getTask,
     readTask,

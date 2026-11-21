@@ -30,7 +30,7 @@ const dependencies = [
 // Status and stopping go through the task's card, with task_status and task_cancel.
 const HopliteTaskTool = Tool.make("cloud_task", {
   description:
-    "Run `prompt` as a cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `provider` is hoplite (default; its own agent, `model` by id or name), e2b, daytona or agent37 (Claude Code in a fresh sandbox, `model` a Claude Code model such as sonnet or opus, `template` the image or snapshot the sandbox is created from). `repo` is the GitHub owner/name to work in. Completion wakes you, so end your turn after starting it.",
+    "Run `prompt` as a cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `provider` is hoplite (default; its own agent, `model` by id or name), e2b, daytona or agent37 (`agent` claude (default) or codex in a fresh sandbox, `model` that agent's model such as sonnet or gpt-5-codex, `template` the image or snapshot the sandbox is created from). `repo` is the GitHub owner/name to work in. Completion wakes you, so end your turn after starting it.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
     provider: HopliteCloudStartTaskInput.fields.provider,
@@ -38,6 +38,7 @@ const HopliteTaskTool = Tool.make("cloud_task", {
     questionId: Schema.optional(HopliteCloudAnswerInput.fields.questionId),
     model: HopliteCloudStartTaskInput.fields.model,
     template: HopliteCloudStartTaskInput.fields.template,
+    agent: HopliteCloudStartTaskInput.fields.agent,
     title: HopliteCloudStartTaskInput.fields.title,
     repo: HopliteCloudStartTaskInput.fields.repo,
     clientRequestId: HopliteCloudStartTaskInput.fields.clientRequestId,

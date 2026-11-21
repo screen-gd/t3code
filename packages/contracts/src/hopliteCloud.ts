@@ -11,6 +11,10 @@ import { NodeId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 export const CloudSandboxProvider = Schema.Literals(["hoplite", "e2b", "daytona", "agent37"]);
 export type CloudSandboxProvider = typeof CloudSandboxProvider.Type;
 
+/** The agent a sandbox task runs: Claude Code by default, or Codex. */
+export const CloudSandboxAgent = Schema.Literals(["claude", "codex"]);
+export type CloudSandboxAgent = typeof CloudSandboxAgent.Type;
+
 const HopliteId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
 const HopliteModel = Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(128)));
 
@@ -37,18 +41,30 @@ export const HopliteCloudStatus = Schema.Struct({
       }),
     ),
   ),
+  /** Where the Codex credential comes from; never its value. */
+  codex: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        source: Schema.Literals(["settings", "environment"]),
+        kind: Schema.Literals(["api_key"]),
+      }),
+    ),
+  ),
 });
 export type HopliteCloudStatus = typeof HopliteCloudStatus.Type;
 
-export const HopliteCloudSetClaudeCredentialInput = Schema.Struct({
-  /** An Anthropic API key, or a subscription token from `claude setup-token`. */
+export const HopliteCloudSetAgentCredentialInput = Schema.Struct({
+  agent: CloudSandboxAgent,
+  /** An Anthropic or OpenAI API key, or a subscription token from `claude setup-token`. */
   credential: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
 });
-export type HopliteCloudSetClaudeCredentialInput = typeof HopliteCloudSetClaudeCredentialInput.Type;
+export type HopliteCloudSetAgentCredentialInput = typeof HopliteCloudSetAgentCredentialInput.Type;
 
-export const HopliteCloudClearClaudeCredentialInput = Schema.Struct({});
-export type HopliteCloudClearClaudeCredentialInput =
-  typeof HopliteCloudClearClaudeCredentialInput.Type;
+export const HopliteCloudClearAgentCredentialInput = Schema.Struct({
+  agent: CloudSandboxAgent,
+});
+export type HopliteCloudClearAgentCredentialInput =
+  typeof HopliteCloudClearAgentCredentialInput.Type;
 
 export const HopliteCloudConnectInput = Schema.Struct({
   /** Omitted means Hoplite. */
@@ -101,9 +117,12 @@ export const HopliteCloudStartTaskInput = Schema.Struct({
   repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /**
    * Hoplite: a model id or name, such as `gpt-6-luna` or "GPT 6 Luna". Sandbox
-   * providers: a Claude Code model such as `sonnet` or `opus`. Omitted uses the default.
+   * providers: the agent's model — a Claude Code model such as `sonnet` or `opus`,
+   * or a Codex model such as `gpt-5-codex`. Omitted uses the default.
    */
   model: HopliteModel,
+  /** Sandbox providers only: the agent to run; omitted runs Claude Code. */
+  agent: Schema.optional(CloudSandboxAgent),
   /** Sandbox providers only: the template or snapshot the sandbox is created from. */
   template: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /** Makes retries create one thread. */

@@ -70,14 +70,14 @@ export function createHopliteCloudEnvironmentAtoms<R, E>(
       tag: WS_METHODS.hopliteCloudDisconnect,
       concurrency: settingsWrite,
     }),
-    setClaudeCredential: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:hoplite-cloud:set-claude-credential",
-      tag: WS_METHODS.hopliteCloudSetClaudeCredential,
+    setAgentCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:hoplite-cloud:set-agent-credential",
+      tag: WS_METHODS.hopliteCloudSetAgentCredential,
       concurrency: settingsWrite,
     }),
-    clearClaudeCredential: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:hoplite-cloud:clear-claude-credential",
-      tag: WS_METHODS.hopliteCloudClearClaudeCredential,
+    clearAgentCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:hoplite-cloud:clear-agent-credential",
+      tag: WS_METHODS.hopliteCloudClearAgentCredential,
       concurrency: settingsWrite,
     }),
     sendTaskMessage: createEnvironmentRpcCommand(runtime, {

@@ -89,6 +89,65 @@ it("runs a follow-up queued behind the turn still running", () => {
   }
 });
 
+it("runs codex turns, resuming the last session on follow-ups", () => {
+  const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-task-"));
+  try {
+    const bin = NodePath.join(home, "bin");
+    NodeFS.mkdirSync(bin);
+    stubUnixTools(bin);
+    NodeFS.writeFileSync(NodePath.join(bin, "git"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    NodeFS.writeFileSync(
+      NodePath.join(bin, "npx"),
+      [
+        "#!/bin/sh",
+        'echo "$@" >> "$HOME/.t3-task/args.log"',
+        'printf \'{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"%s"}}\\n\' "$T3_TASK_PROMPT"',
+        'printf \'{"type":"turn.completed","usage":{}}\\n\'',
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const state = NodePath.join(home, ".t3-task");
+    NodeFS.mkdirSync(state, { recursive: true });
+    const run = NodeChildProcess.spawnSync(
+      "bash",
+      [
+        "-c",
+        [
+          'export PATH="$HOME/bin:$PATH"',
+          'export T3_TASK_AGENT="codex"',
+          'export T3_TASK_PROMPT="first"',
+          'export T3_TASK_MODEL="gpt-5-codex"',
+          agentTurnScript({ first: true }),
+          'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+          'export T3_TASK_PROMPT="second"',
+          "unset T3_TASK_MODEL",
+          agentTurnScript({ first: false }),
+          'pid=$(cat "$HOME/.t3-task/runner.pid"); while kill -0 "$pid" 2>/dev/null; do :; done',
+        ].join("\n"),
+      ],
+      bashEnv(home),
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(NodeFS.readFileSync(NodePath.join(state, "agent"), "utf8"), "codex");
+    const args = NodeFS.readFileSync(NodePath.join(state, "args.log"), "utf8").split("\n");
+    assert.include(
+      args[0],
+      "-y @openai/codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-5-codex first",
+    );
+    assert.include(
+      args[1],
+      "-y @openai/codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-5-codex resume --last second",
+    );
+    assert.equal(
+      NodeFS.readFileSync(NodePath.join(state, "runs", "2", "model"), "utf8"),
+      "gpt-5-codex",
+    );
+  } finally {
+    NodeFS.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 it("preserves a completed turn when another caller starts the next turn", () => {
   const home = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-task-"));
   try {
@@ -179,6 +238,61 @@ it("parses a turn's reply from stream-json, old output and a turn still running"
     latestReply: "halfway",
     pullRequestUrl: null,
   });
+  const codexDone = [
+    "turn=4",
+    "exit=0",
+    "---",
+    JSON.stringify({ type: "thread.started", thread_id: "thr_1" }),
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "m1", type: "agent_message", text: "first draft" },
+    }),
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "m2", type: "agent_message", text: "codex settled" },
+    }),
+    JSON.stringify({ type: "turn.completed", usage: {} }),
+    "",
+    "---t3-task-err---",
+    "",
+  ].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: codexDone }), {
+    thread: "ready",
+    run: { id: "turn-4", status: "completed" },
+    latestReply: "codex settled",
+    pullRequestUrl: null,
+  });
+  const codexRunning = [
+    "turn=5",
+    "exit=",
+    "---",
+    JSON.stringify({
+      type: "item.completed",
+      item: { id: "m1", type: "agent_message", text: "codex midway" },
+    }),
+    "",
+  ].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: codexRunning }), {
+    thread: "running",
+    run: { id: "turn-5", status: "running" },
+    latestReply: "codex midway",
+    pullRequestUrl: null,
+  });
+  const codexFailed = [
+    "turn=6",
+    "exit=1",
+    "---",
+    JSON.stringify({ type: "turn.failed", error: { message: "stream disconnected" } }),
+    "",
+    "---t3-task-err---",
+    "",
+  ].join("\n");
+  assert.deepStrictEqual(parseTurn({ exitCode: 0, output: codexFailed }), {
+    thread: "failed",
+    run: { id: "turn-6", status: "failed" },
+    latestReply: "stream disconnected",
+    pullRequestUrl: null,
+  });
 });
 
 const toolUse = (id: string, name: string, input: Record<string, string>) =>
@@ -231,6 +345,83 @@ it("parses a chat's prompts, replies and tool states", () => {
     { _tag: "tool", id: "toolu_2", title: "Edit: src/app.ts", status: "failed" },
     // toolu_3 never answered before the turn exited, so it counts as failed.
     { _tag: "tool", id: "toolu_3", title: "Read: src/gone.ts", status: "failed" },
+  ]);
+
+  const codex = [
+    chatTurn(
+      2,
+      "Codex task",
+      [
+        JSON.stringify({ type: "thread.started", thread_id: "thr_1" }),
+        JSON.stringify({
+          type: "item.started",
+          item: { id: "c1", type: "command_execution", command: "ls -la\nwc -l x" },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: "m1", type: "agent_message", text: "listed" },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "c1",
+            type: "command_execution",
+            command: "ls -la\nwc -l x",
+            exit_code: 0,
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "c2",
+            type: "command_execution",
+            command: "false",
+            exit_code: 1,
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.completed",
+          item: {
+            id: "f1",
+            type: "file_change",
+            changes: [
+              { path: "a.ts", kind: "add" },
+              { path: "b.ts", kind: "update" },
+            ],
+            status: "completed",
+          },
+        }),
+        JSON.stringify({
+          type: "item.started",
+          item: { id: "w1", type: "mcp_tool_call", server: "t3", tool: "search" },
+        }),
+        JSON.stringify({ type: "turn.completed", usage: {} }),
+      ],
+      "0",
+    ),
+    chatTurn(
+      3,
+      "Fails",
+      [JSON.stringify({ type: "turn.failed", error: { message: "ran out of turns" } })],
+      "1",
+    ),
+    "---t3-chat-running---",
+    "0",
+  ].join("\n");
+  assert.deepStrictEqual(parseChat(codex), [
+    { _tag: "message", id: "turn-2-user", role: "user", text: "Codex task" },
+    // A started command reports in_progress until its completed event arrives.
+    { _tag: "tool", id: "c1", title: "Bash: ls -la", status: "completed" },
+    { _tag: "message", id: "turn-2-1", role: "assistant", text: "listed" },
+    // A completed command with a non-zero exit counts as failed.
+    { _tag: "tool", id: "c2", title: "Bash: false", status: "failed" },
+    { _tag: "tool", id: "f1", title: "Edit: a.ts (+1 more)", status: "completed" },
+    // w1 never completed before the turn exited, so it counts as failed.
+    { _tag: "tool", id: "w1", title: "t3.search", status: "failed" },
+    { _tag: "message", id: "turn-3-user", role: "user", text: "Fails" },
+    { _tag: "message", id: "turn-3-1", role: "assistant", text: "ran out of turns" },
   ]);
 });
 
