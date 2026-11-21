@@ -682,9 +682,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "keep-running-in-tray",
-    title: "Keep running in tray",
+    title: msg("Keep running in tray"),
     to: "/settings/labs",
-    searchTerms: ["beta system tray background close window minimize hide server agents remote"],
+    searchTerms: [
+      msg("beta system tray background close window minimize hide server agents remote"),
+    ],
     desktopOnly: true,
     nonMacOnly: true,
   },
@@ -813,6 +815,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Follow-up behavior"),
     to: "/settings/chat",
     searchTerms: [msg("queue steer running turn send default behavior composer")],
+  },
+  {
+    id: "side-thread-open-target",
+    title: msg("Open subagents and side chats in"),
+    to: "/settings/chat",
+    searchTerms: [
+      msg(
+        "subagent side chat linked thread click right panel side panel main view command ctrl middle click",
+      ),
+    ],
   },
   {
     id: "provider-update-checks",
@@ -1314,6 +1326,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: msg("Actions"),
     to: "/settings/projects",
     searchTerms: [msg("commands scripts setup run dev server checkout worktree t3.json import")],
+  },
+  {
+    id: "project-repositories",
+    title: msg("Repositories"),
+    to: "/settings/projects",
+    searchTerms: [msg("tracked folders multi repo workspace code-workspace rescan add folder")],
   },
   {
     id: "environment-icon",
