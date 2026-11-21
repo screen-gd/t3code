@@ -288,8 +288,8 @@ For Antigravity's Google callback on a remote host, see
 
 T3 Code can hand tasks to cloud sandboxes from [Hoplite](https://hoplite.sh),
 [E2B](https://e2b.dev), [Daytona](https://daytona.io) and
-[Agent37](https://agent37.com). Open **Settings → Environments → Add
-environment**, choose **Cloud sandbox**, pick a provider, and paste its API key.
+[Agent37](https://agent37.com). Open **Settings → Environments**, find the
+provider under **Cloud sandboxes**, and choose **Connect** to add its API key.
 Each key stays on the machine running T3 Code; clients and agents never see it.
 **Disconnect** removes a provider's key.
 

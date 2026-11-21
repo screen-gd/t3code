@@ -1808,7 +1808,7 @@ function ConnectionsSettingsContent({
       ) : null}
       <SettingsSection
         {...searchableSetting("remote-environments")}
-        title={gt("Environments")}
+        title={gt("Remote environments")}
         headerAction={
           <div className="flex items-center gap-1">
             {savedServerUpdateTargets.length > 0 ? (

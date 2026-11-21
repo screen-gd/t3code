@@ -7293,8 +7293,6 @@
   "1bea4864d46d70d0": "Pair another environment to this client.",
   "9b24ef052b321e57": "Enter a backend host and pairing code.",
   "a5492ad9432ad03f": "Use your SSH config, agent, and tunnels.",
-  "f6bf02d3bffb71cf": "Cloud sandbox",
-  "47ecb110fceeb3d9": "Let agents use Hoplite, E2B, Daytona and Agent37 sandboxes.",
   "e147ee6a5a38e6cd": "Host",
   "5e11277c0af743da": "Paste a full pairing URL here to fill both fields automatically.",
   "4573320c3e8ab4b7": "This machine is on your T3 Connect account. Use it as a fallback route.",
@@ -8377,11 +8375,7 @@
   "4a67a44a39ad7737": "{help} It''s saved on this computer and never shown in the app again.",
   "79aaa756755338f0": "Replace {provider} key",
   "e76f6e3eece6c512": "Connect {provider}",
-  "3eb2c31479c86a92": "Cloud agents",
-  "96f336001025ac9f": "Agents can send tasks to these cloud sandboxes. Results come back to the chat.",
   "2579a1e5421bae70": "Connecting a cloud sandbox needs settings access on this machine.",
-  "9f90d63bcad3e2a7": "Manage",
-  "d02f07994b8a5f27": "Cloud sandboxes",
   "0346ac3eabe913f1": "Keys stay on this machine.",
   "d6ad43bc4b700a88": "Browser profile data is not available to clear.",
   "ad8efd437b301a37": "System",
@@ -12214,5 +12208,9 @@
   "27d76249d09eb69f": "Review guide ready",
   "faa3bb26abb39c93": "Review guide failed",
   "b7df38b7d8792d78": "Open guide",
-  "9e91e9a77b664e4e": "Could not start a review guide"
+  "9e91e9a77b664e4e": "Could not start a review guide",
+  "48a58e5e5cb0873e": "Remote environments",
+  "605b397e8bf2110e": "Cloud sandboxes",
+  "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
+  "3d7cdab1909733c0": "Manage"
 }

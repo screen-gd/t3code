@@ -18,7 +18,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
+import { Skeleton } from "../ui/skeleton";
 import {
   Dialog,
   DialogDescription,
@@ -26,7 +26,6 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-  DialogTrigger,
 } from "../ui/dialog";
 import {
   CLOUD_SANDBOX_PROVIDERS,
@@ -46,7 +45,7 @@ const providerStatuses = (status: HopliteCloudStatus): ReadonlyArray<CloudSandbo
  * Cloud sandbox providers run agents in their own sandboxes. This machine keeps each
  * provider's API key and starts the tasks, so a key never comes back to a client once sent.
  */
-export function HopliteCloudSetup() {
+function HopliteCloudSetup({ provider }: { provider: CloudSandboxProvider }) {
   const gt = useGT();
   const m = useMessages();
   const environmentId = usePrimaryEnvironmentId();
@@ -58,7 +57,6 @@ export function HopliteCloudSetup() {
   );
   const connect = useAtomCommand(hopliteCloudEnvironment.connect, { reportFailure: false });
   const disconnect = useAtomCommand(hopliteCloudEnvironment.disconnect, { reportFailure: false });
-  const [provider, setProvider] = useState<CloudSandboxProvider>("hoplite");
   const [apiKey, setApiKey] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,13 +96,9 @@ export function HopliteCloudSetup() {
   }
 
   const statuses = providerStatuses(status);
-  const connected = statuses.filter((entry) => entry.connected);
+  const connected = statuses.filter((entry) => entry.connected && entry.provider === provider);
   const selected = cloudSandboxProviderInfo(provider);
   const selectedStatus = statuses.find((entry) => entry.provider === provider);
-  // Only what this server takes a key for; older ones list fewer providers, or none.
-  const offered = CLOUD_SANDBOX_PROVIDERS.filter((entry) =>
-    statuses.some((candidate) => candidate.provider === entry.id),
-  );
 
   return (
     <div className="space-y-4">
@@ -153,29 +147,6 @@ export function HopliteCloudSetup() {
           }
         }}
       >
-        {offered.length > 1 ? (
-          <div>
-            <span className="mb-1.5 block text-xs font-medium text-foreground">
-              <T>Provider</T>
-            </span>
-            <ToggleGroup
-              aria-label={gt("Provider")}
-              variant="segmented"
-              value={[provider]}
-              onValueChange={(next) => {
-                const value = offered.find((entry) => entry.id === next[0]);
-                if (value) setProvider(value.id);
-              }}
-            >
-              {offered.map((entry) => (
-                <Toggle key={entry.id} value={entry.id} disabled={pending}>
-                  <CloudSandboxProviderMark provider={entry} className="size-3.5" />
-                  {entry.name}
-                </Toggle>
-              ))}
-            </ToggleGroup>
-          </div>
-        ) : null}
         <label className="block">
           <span className="mb-1.5 block text-xs font-medium text-foreground">
             {gt("{provider} API key", { provider: selected.name })}
@@ -215,7 +186,7 @@ export function HopliteCloudSetup() {
 }
 
 /**
- * Connected cloud sandboxes get their own section: they take tasks rather than
+ * Cloud sandboxes get their own section: they take tasks rather than
  * pairing a machine, so they stay out of the paired environments list.
  */
 export function HopliteCloudSection() {
@@ -227,47 +198,88 @@ export function HopliteCloudSection() {
       ? hopliteCloudEnvironment.status({ environmentId, input: {} })
       : null,
   );
-  const [manageOpen, setManageOpen] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<CloudSandboxProvider | null>(null);
   const status = query.data;
-  const connected =
-    status === null ? [] : providerStatuses(status).filter((entry) => entry.connected);
-  if (connected.length === 0) return null;
-  const infos = connected.map((entry) => cloudSandboxProviderInfo(entry.provider));
-  const problem = connected.find((entry) => entry.problem !== null)?.problem;
+  const statuses = status === null ? [] : providerStatuses(status);
+  // Older servers expose only the providers they support.
+  const offered = CLOUD_SANDBOX_PROVIDERS.filter((provider) =>
+    statuses.some((entry) => entry.provider === provider.id),
+  );
+  const canConfigure = environmentId !== null && canEdit;
   return (
-    <SettingsSection id="hoplite-cloud" title={gt("Cloud agents")}>
-      <SettingsRow
-        title={
-          <span className="flex items-center gap-2">
-            <CloudSandboxProviderMarks providers={infos} />
-            {infos.map((info) => info.name).join(", ")}
-          </span>
-        }
-        description={
-          problem ??
-          gt("Agents can send tasks to these cloud sandboxes. Results come back to the chat.")
-        }
-        control={
-          <Dialog open={manageOpen} onOpenChange={setManageOpen}>
-            <DialogTrigger render={<Button size="sm" variant="outline" />}>
-              <T>Manage</T>
-            </DialogTrigger>
-            <DialogPopup className="sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>
-                  <T>Cloud sandboxes</T>
-                </DialogTitle>
-                <DialogDescription>
-                  <T>Keys stay on this machine.</T>
-                </DialogDescription>
-              </DialogHeader>
-              <DialogPanel>
-                <HopliteCloudSetup />
-              </DialogPanel>
-            </DialogPopup>
-          </Dialog>
-        }
-      />
+    <SettingsSection id="hoplite-cloud" title={gt("Cloud sandboxes")}>
+      {!canConfigure ? (
+        <SettingsRow
+          title={gt("Connecting a cloud sandbox needs settings access on this machine.")}
+        />
+      ) : status === null ? (
+        query.error ? (
+          <SettingsRow title={query.error} />
+        ) : (
+          CLOUD_SANDBOX_PROVIDERS.map((provider) => (
+            <SettingsRow
+              key={provider.id}
+              title={<Skeleton className="h-4 w-24" />}
+              description={<Skeleton className="h-3 w-32" />}
+              control={<Skeleton className="h-7 w-20" />}
+            />
+          ))
+        )
+      ) : (
+        offered.map((provider) => {
+          const entry = statuses.find((candidate) => candidate.provider === provider.id);
+          return (
+            <SettingsRow
+              key={provider.id}
+              title={
+                <span className="flex items-center gap-2">
+                  <CloudSandboxProviderMarks providers={[provider]} />
+                  {provider.name}
+                </span>
+              }
+              description={
+                entry?.problem ?? (entry?.connected ? gt("Connected") : gt("Not connected"))
+              }
+              control={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSelectedProvider(provider.id)}
+                >
+                  {entry?.connected ? gt("Manage") : gt("Connect")}
+                </Button>
+              }
+            />
+          );
+        })
+      )}
+      <Dialog
+        open={selectedProvider !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedProvider(null);
+            query.refresh();
+          }
+        }}
+      >
+        <DialogPopup className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedProvider === null
+                ? gt("Cloud sandboxes")
+                : cloudSandboxProviderInfo(selectedProvider).name}
+            </DialogTitle>
+            <DialogDescription>
+              <T>Keys stay on this machine.</T>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogPanel>
+            {selectedProvider === null ? null : (
+              <HopliteCloudSetup key={selectedProvider} provider={selectedProvider} />
+            )}
+          </DialogPanel>
+        </DialogPopup>
+      </Dialog>
     </SettingsSection>
   );
 }

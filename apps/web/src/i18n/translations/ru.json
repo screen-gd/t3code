@@ -7286,8 +7286,6 @@
   "1bea4864d46d70d0": "Выполните сопряжение этого клиента с другим окружением.",
   "9b24ef052b321e57": "Введите хост бэкенда и код сопряжения.",
   "a5492ad9432ad03f": "Use your SSH config, agent, and tunnels.",
-  "f6bf02d3bffb71cf": "Cloud sandbox",
-  "47ecb110fceeb3d9": "Позвольте агентам использовать песочницы Hoplite, E2B, Daytona и Agent37.",
   "e147ee6a5a38e6cd": "Хост",
   "5e11277c0af743da": "Вставьте сюда полный URL сопряжения, чтобы заполнить оба поля автоматически.",
   "4573320c3e8ab4b7": "Эта машина есть в вашем аккаунте T3 Connect. Используйте её как запасной маршрут.",
@@ -8369,11 +8367,7 @@
   "4a67a44a39ad7737": "{help} It''s saved on this computer and never shown in the app again.",
   "79aaa756755338f0": "Replace {provider} key",
   "e76f6e3eece6c512": "Connect {provider}",
-  "3eb2c31479c86a92": "Cloud agents",
-  "96f336001025ac9f": "Agents can send tasks to these cloud sandboxes. Results come back to the chat.",
   "2579a1e5421bae70": "Connecting a cloud sandbox needs settings access on this machine.",
-  "9f90d63bcad3e2a7": "Manage",
-  "d02f07994b8a5f27": "Cloud sandboxes",
   "0346ac3eabe913f1": "Keys stay on this machine.",
   "d6ad43bc4b700a88": "Данные профиля браузера недоступны для очистки.",
   "ad8efd437b301a37": "Как в системе",
@@ -12204,5 +12198,9 @@
   "27d76249d09eb69f": "Гид по ревью готов",
   "faa3bb26abb39c93": "Не удалось создать гид по ревью",
   "b7df38b7d8792d78": "Открыть гид",
-  "9e91e9a77b664e4e": "Не удалось запустить гид по ревью"
+  "9e91e9a77b664e4e": "Не удалось запустить гид по ревью",
+  "48a58e5e5cb0873e": "Удалённые окружения",
+  "605b397e8bf2110e": "Cloud sandboxes",
+  "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
+  "3d7cdab1909733c0": "Manage"
 }
