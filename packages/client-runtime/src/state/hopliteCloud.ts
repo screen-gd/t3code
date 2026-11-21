@@ -70,6 +70,16 @@ export function createHopliteCloudEnvironmentAtoms<R, E>(
       tag: WS_METHODS.hopliteCloudDisconnect,
       concurrency: settingsWrite,
     }),
+    setClaudeCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:hoplite-cloud:set-claude-credential",
+      tag: WS_METHODS.hopliteCloudSetClaudeCredential,
+      concurrency: settingsWrite,
+    }),
+    clearClaudeCredential: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:hoplite-cloud:clear-claude-credential",
+      tag: WS_METHODS.hopliteCloudClearClaudeCredential,
+      concurrency: settingsWrite,
+    }),
     sendTaskMessage: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:hoplite-cloud:send-task-message",
       tag: WS_METHODS.hopliteCloudSendTaskMessage,

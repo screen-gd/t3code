@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { NodeId, ScopedThreadRef } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
-import { T, useGT } from "gt-react";
+import { useGT } from "gt-react";
 import { lazy, Suspense, useState, type KeyboardEvent } from "react";
 
 import { hopliteCloudEnvironment } from "../../state/hopliteCloud";
@@ -10,6 +10,7 @@ import { useEnvironmentQuerySelector } from "../../state/query";
 import { environmentThreadDetails } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRightPanelStore } from "../../rightPanelStore";
+import { cloudSandboxProviderInfo } from "../CloudSandboxLogos";
 import { Button } from "../ui/button";
 import { Spinner } from "../ui/spinner";
 import { Textarea } from "../ui/textarea";
@@ -23,11 +24,12 @@ const chatRunning = <E,>(
   result: AsyncResult.AsyncResult<{ readonly running: boolean | null }, E>,
 ) => AsyncResult.getOrElse(result, () => null)?.running ?? null;
 
-export function CloudTaskChatLoading() {
+export function CloudTaskChatLoading(props: { readonly provider: string }) {
+  const gt = useGT();
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
       <Spinner className="size-4" />
-      <T>Loading chat from Hoplite</T>
+      {gt("Loading chat from {provider}", { provider: props.provider })}
     </div>
   );
 }
@@ -38,8 +40,8 @@ export function openCloudTaskChat(parentRef: ScopedThreadRef, taskId: NodeId, ti
 }
 
 /**
- * A task delegated to Hoplite, as a chat: Hoplite's history and live activity over
- * ACP, read by the environment holding the key, and follow-ups sent as the parent.
+ * A task delegated to a cloud sandbox, as a chat: its history and live activity,
+ * read by the environment holding the key, and follow-ups sent as the parent.
  */
 export default function CloudTaskChatPane(props: {
   readonly parentRef: ScopedThreadRef;
@@ -49,10 +51,13 @@ export default function CloudTaskChatPane(props: {
 }) {
   const gt = useGT();
   const { parentRef, taskId } = props;
-  const status = useAtomValue(
+  const subagent = useAtomValue(
     environmentThreadDetails.threadAtom(parentRef),
-    (thread) => thread?.projection.subagents.find((agent) => agent.id === taskId)?.status ?? null,
+    (thread) => thread?.projection.subagents.find((agent) => agent.id === taskId) ?? null,
   );
+  const status = subagent?.status ?? null;
+  const service = subagent?.remoteChild?.service;
+  const provider = service === undefined ? HOPLITE : cloudSandboxProviderInfo(service).name;
   // The same subscription the entries render; it knows about runs started from this pane.
   const chatIsRunning = useEnvironmentQuerySelector(
     hopliteCloudEnvironment.taskChat({
@@ -102,7 +107,7 @@ export default function CloudTaskChatPane(props: {
       <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pr-1 pl-3">
         <span className="min-w-0 flex-1 truncate text-xs font-medium">{props.title}</span>
         <span className="shrink-0 text-xs text-muted-foreground">
-          {running ? gt("Running in Hoplite") : HOPLITE}
+          {running ? gt("Running in {provider}", { provider }) : provider}
         </span>
         <Button
           variant="ghost"
@@ -114,11 +119,12 @@ export default function CloudTaskChatPane(props: {
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <Suspense fallback={<CloudTaskChatLoading />}>
+        <Suspense fallback={<CloudTaskChatLoading provider={provider} />}>
           <CloudTaskChatEntries
             environmentId={parentRef.environmentId}
             threadId={parentRef.threadId}
             taskId={taskId}
+            provider={provider}
           />
         </Suspense>
       </div>

@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type {
   CloudSandboxProvider,
   CloudSandboxProviderStatus,
+  EnvironmentId,
   HopliteCloudStatus,
 } from "@t3tools/contracts";
 import {
@@ -187,6 +188,111 @@ function HopliteCloudSetup({ provider }: { provider: CloudSandboxProvider }) {
 }
 
 /**
+ * The Claude login every sandbox agent signs in with. A saved one wins over this
+ * machine's environment; the row never shows the credential itself.
+ */
+function ClaudeCredentialRow(props: {
+  readonly environmentId: EnvironmentId;
+  readonly status: HopliteCloudStatus;
+  readonly refresh: () => void;
+}) {
+  const gt = useGT();
+  const save = useAtomCommand(hopliteCloudEnvironment.setClaudeCredential, {
+    reportFailure: false,
+  });
+  const clear = useAtomCommand(hopliteCloudEnvironment.clearClaudeCredential, {
+    reportFailure: false,
+  });
+  const [credential, setCredential] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const claude = props.status.claude ?? null;
+  const label =
+    claude === null
+      ? gt("Not set")
+      : claude.source === "settings"
+        ? claude.kind === "api_key"
+          ? gt("Saved API key")
+          : gt("Saved subscription token")
+        : gt("From this machine's environment");
+
+  const run = async (command: () => Promise<AtomCommandResult<HopliteCloudStatus, unknown>>) => {
+    setPending(true);
+    setError(null);
+    const result = await command();
+    setPending(false);
+    if (result._tag === "Success") {
+      setCredential("");
+      props.refresh();
+      return;
+    }
+    const failure = squashAtomCommandFailure(result);
+    setError(failure instanceof Error ? failure.message : gt("The credential could not be saved."));
+  };
+
+  return (
+    <SettingsRow
+      title={gt("Claude for sandboxes")}
+      description={
+        <span className="flex flex-col gap-1">
+          <span className="flex items-center gap-1.5">
+            {claude !== null ? <ConnectionStatusDot dotClassName="bg-success" /> : null}
+            {label}
+          </span>
+          <span>
+            {gt(
+              "Paste an Anthropic API key, or run `claude setup-token` and paste its token to use a Claude plan.",
+            )}
+          </span>
+          {error ? <span className="text-destructive">{error}</span> : null}
+        </span>
+      }
+      control={
+        <span className="flex items-center gap-2">
+          <Input
+            type="password"
+            autoComplete="off"
+            spellCheck={false}
+            value={credential}
+            onChange={(event) => setCredential(event.target.value)}
+            placeholder={gt("API key or setup-token")}
+            disabled={pending}
+            className="w-44"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pending || credential.trim() === ""}
+            onClick={() =>
+              void run(() =>
+                save({
+                  environmentId: props.environmentId,
+                  input: { credential: credential.trim() },
+                }),
+              )
+            }
+          >
+            {pending ? gt("Saving…") : gt("Save")}
+          </Button>
+          {claude?.source === "settings" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() =>
+                void run(() => clear({ environmentId: props.environmentId, input: {} }))
+              }
+            >
+              <T>Remove</T>
+            </Button>
+          ) : null}
+        </span>
+      }
+    />
+  );
+}
+
+/**
  * Cloud sandboxes get their own section: they take tasks rather than
  * pairing a machine, so they stay out of the paired environments list.
  */
@@ -227,37 +333,46 @@ export function HopliteCloudSection() {
           ))
         )
       ) : (
-        offered.map((provider) => {
-          const entry = statuses.find((candidate) => candidate.provider === provider.id);
-          return (
-            <SettingsRow
-              key={provider.id}
-              title={
-                <span className="flex items-center gap-2">
-                  <CloudSandboxProviderMarks providers={[provider]} />
-                  {provider.name}
-                </span>
-              }
-              description={
-                entry?.problem ?? (
-                  <span className="flex items-center gap-1.5">
-                    {entry?.connected ? <ConnectionStatusDot dotClassName="bg-success" /> : null}
-                    {entry?.connected ? gt("Connected") : gt("Not connected")}
+        <>
+          {offered.map((provider) => {
+            const entry = statuses.find((candidate) => candidate.provider === provider.id);
+            return (
+              <SettingsRow
+                key={provider.id}
+                title={
+                  <span className="flex items-center gap-2">
+                    <CloudSandboxProviderMarks providers={[provider]} />
+                    {provider.name}
                   </span>
-                )
-              }
-              control={
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectedProvider(provider.id)}
-                >
-                  {entry?.connected ? gt("Manage") : gt("Connect")}
-                </Button>
-              }
+                }
+                description={
+                  entry?.problem ?? (
+                    <span className="flex items-center gap-1.5">
+                      {entry?.connected ? <ConnectionStatusDot dotClassName="bg-success" /> : null}
+                      {entry?.connected ? gt("Connected") : gt("Not connected")}
+                    </span>
+                  )
+                }
+                control={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setSelectedProvider(provider.id)}
+                  >
+                    {entry?.connected ? gt("Manage") : gt("Connect")}
+                  </Button>
+                }
+              />
+            );
+          })}
+          {environmentId === null ? null : (
+            <ClaudeCredentialRow
+              environmentId={environmentId}
+              status={status}
+              refresh={query.refresh}
             />
-          );
-        })
+          )}
+        </>
       )}
       <Dialog
         open={selectedProvider !== null}

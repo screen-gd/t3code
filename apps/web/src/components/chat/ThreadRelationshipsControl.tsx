@@ -298,7 +298,7 @@ function RemoteSubagentRow(props: {
   const gt = useGT();
   const m = useMessages();
   const { remoteChild } = props.agent;
-  const showsChat = remoteChild.service === "hoplite";
+  const showsChat = remoteChild.service !== undefined;
   const status = props.agent.status;
   const failed = status === "failed";
   const title = relationshipThreadTitle({
