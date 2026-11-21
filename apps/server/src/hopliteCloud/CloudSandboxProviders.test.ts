@@ -13,6 +13,7 @@ import * as HopliteCloud from "./HopliteCloudService.ts";
 
 const KEYS = { e2b: "e2b_good_key", daytona: "dtn_good_key", agent37: "sk_live_good_key" };
 const ANTHROPIC_KEY = "sk-ant-model-secret";
+const OAUTH_TOKEN = "sk-ant-oat01-subscription-secret";
 const GITHUB_TOKEN = "ghp_github_secret";
 
 interface Sent {
@@ -237,6 +238,59 @@ it.effect("asks for a model key before creating a sandbox for a task", () => {
       "not_connected",
     );
     assert.equal(harness.sent.length, before);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+interface ClaudeKeyCase {
+  readonly environment: NodeJS.ProcessEnv;
+  readonly commandOutput?: string;
+  readonly included: ReadonlyArray<string>;
+  readonly excluded: ReadonlyArray<string>;
+  readonly envOutput?: string;
+}
+
+const claudeKeyCases: ReadonlyArray<readonly [name: string, options: ClaudeKeyCase]> = [
+  [
+    "runs Claude Code on a subscription token when no API key is set",
+    {
+      environment: { CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN },
+      commandOutput: `CLAUDE_CODE_OAUTH_TOKEN=${OAUTH_TOKEN}`,
+      included: ["CLAUDE_CODE_OAUTH_TOKEN", OAUTH_TOKEN],
+      excluded: ["ANTHROPIC_API_KEY"],
+      envOutput: "CLAUDE_CODE_OAUTH_TOKEN=[redacted]",
+    },
+  ],
+  [
+    "prefers the API key when a subscription token is also set",
+    {
+      environment: {
+        ANTHROPIC_API_KEY: ANTHROPIC_KEY,
+        CLAUDE_CODE_OAUTH_TOKEN: OAUTH_TOKEN,
+      },
+      included: [ANTHROPIC_KEY],
+      excluded: [OAUTH_TOKEN],
+    },
+  ],
+];
+
+it.effect.each(claudeKeyCases)("%s", ([, options]) => {
+  const harness = makeHarness(options.environment, {
+    commandOutput: options.commandOutput ?? "",
+  });
+  return Effect.gen(function* () {
+    const cloud = yield* HopliteCloud.HopliteCloud;
+    yield* cloud.connect("daytona", KEYS.daytona);
+    yield* cloud.startTask({ provider: "daytona", prompt: "Fix", repo: "acme/web" });
+    const turn = harness.sent.find((request) =>
+      request.body.includes("--dangerously-skip-permissions"),
+    );
+    assert.isDefined(turn);
+    for (const expected of options.included) assert.include(turn!.body, expected);
+    for (const unexpected of options.excluded) assert.notInclude(turn!.body, unexpected);
+    if (options.envOutput !== undefined) {
+      const ran = yield* cloud.runInSandbox({ sandboxId: "daytona:dsb-1", command: "env" });
+      assert.equal(ran.output, options.envOutput);
+    }
   }).pipe(Effect.provide(harness.layer));
 });
 

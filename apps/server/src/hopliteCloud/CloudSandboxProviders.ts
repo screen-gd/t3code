@@ -44,7 +44,11 @@ export const providerOfTask = (
 
 /** What goes into a sandbox so the agent there can work: never logged or returned. */
 export interface AgentKeys {
-  readonly anthropicApiKey: string;
+  /** The one credential Claude Code in the sandbox signs in with, under the variable it reads. */
+  readonly claude: {
+    readonly variable: "ANTHROPIC_API_KEY" | "CLAUDE_CODE_OAUTH_TOKEN";
+    readonly value: string;
+  };
   readonly githubToken: string | undefined;
 }
 

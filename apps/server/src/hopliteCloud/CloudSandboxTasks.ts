@@ -50,7 +50,7 @@ export const agentTurnEnv = (
   prompt: string,
   repo: string | undefined,
 ): Record<string, string> => ({
-  ANTHROPIC_API_KEY: keys.anthropicApiKey,
+  [keys.claude.variable]: keys.claude.value,
   ...(keys.githubToken === undefined
     ? {}
     : { GH_TOKEN: keys.githubToken, GITHUB_TOKEN: keys.githubToken }),

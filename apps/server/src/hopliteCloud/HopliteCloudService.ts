@@ -415,18 +415,26 @@ const make = Effect.gen(function* () {
     failure: (provider, code) => Effect.fail(failure(code, provider)),
   });
   const sessionOf = (provider: SessionProvider) => sessions[provider];
-  // The agent in a sandbox runs on this machine's model key and GitHub token.
+  // The agent in a sandbox runs on this machine's Claude credential and GitHub
+  // token; as in Claude Code itself, the API key wins when both are set.
   const agentKeys = Effect.fn("HopliteCloud.agentKeys")(function* () {
-    const anthropicApiKey = environment.ANTHROPIC_API_KEY;
-    if (anthropicApiKey === undefined || anthropicApiKey === "") {
+    const apiKey = environment.ANTHROPIC_API_KEY;
+    const oauthToken = environment.CLAUDE_CODE_OAUTH_TOKEN;
+    const claude: AgentKeys["claude"] | undefined =
+      apiKey !== undefined && apiKey !== ""
+        ? { variable: "ANTHROPIC_API_KEY", value: apiKey }
+        : oauthToken !== undefined && oauthToken !== ""
+          ? { variable: "CLAUDE_CODE_OAUTH_TOKEN", value: oauthToken }
+          : undefined;
+    if (claude === undefined) {
       return yield* new HopliteCloudError({
         code: "not_connected",
         message:
-          "Set ANTHROPIC_API_KEY where T3 Code runs: the agent in the sandbox runs Claude Code on it.",
+          "Set ANTHROPIC_API_KEY, or CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token` to use a Claude subscription, where T3 Code runs: the agent in the sandbox runs Claude Code on it.",
       });
     }
     const githubToken = environment.GH_TOKEN || environment.GITHUB_TOKEN || undefined;
-    return { anthropicApiKey, githubToken } satisfies AgentKeys;
+    return { claude, githubToken } satisfies AgentKeys;
   });
   // Every key a sandbox can hold, to keep out of anything that comes back from it.
   const sandboxSecrets = (apiKey: string) =>
@@ -434,7 +442,7 @@ const make = Effect.gen(function* () {
       Effect.map(
         Option.match({
           onNone: () => [apiKey],
-          onSome: (agent) => [apiKey, agent.anthropicApiKey, agent.githubToken],
+          onSome: (agent) => [apiKey, agent.claude.value, agent.githubToken],
         }),
       ),
     );
@@ -750,7 +758,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.tapError(() => removeSandbox));
     if (started.exitCode !== 0) {
       yield* removeSandbox;
-      return yield* turnFailed(provider, started, [apiKey, keys.anthropicApiKey, keys.githubToken]);
+      return yield* turnFailed(provider, started, [apiKey, keys.claude.value, keys.githubToken]);
     }
     return {
       task: {
@@ -851,7 +859,7 @@ const make = Effect.gen(function* () {
       });
     }
     if (ran.exitCode !== 0) {
-      return yield* turnFailed(provider, ran, [apiKey, keys.anthropicApiKey, keys.githubToken]);
+      return yield* turnFailed(provider, ran, [apiKey, keys.claude.value, keys.githubToken]);
     }
     return { runId: startedRunId(ran) };
   });

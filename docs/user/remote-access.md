@@ -301,12 +301,15 @@ account there.
 
 - **Hoplite** runs its own cloud agent, on a model you pick.
 - **E2B, Daytona and Agent37** start a new sandbox per task, clone the
-  repository into it, and run Claude Code there. Set `ANTHROPIC_API_KEY` where
-  T3 Code runs, and `GH_TOKEN` or `GITHUB_TOKEN` for private repositories and
-  pull requests. Those two go into the sandbox as the agent's environment, so
-  the agent and anything it runs can read them. T3 Code replaces them, and the
-  provider key, with `[redacted]` in the replies it shows. The sandbox stays
-  until the provider stops it for idling or an agent deletes it.
+  repository into it, and run Claude Code there. Set `ANTHROPIC_API_KEY`, or
+  `CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` to run on a Claude Pro
+  or Max subscription, where T3 Code runs, and `GH_TOKEN` or `GITHUB_TOKEN`
+  for private repositories and pull requests. If both are set, the API key is
+  used. The Claude credential and the GitHub token go into the sandbox as the
+  agent's environment, so the agent and anything it runs can read them. T3
+  Code replaces them, and the provider key, with `[redacted]` in the replies
+  it shows. The sandbox stays until the provider stops it for idling or an
+  agent deletes it.
 
 Agents can also create an empty E2B, Daytona or Agent37 sandbox and run
 commands in it themselves. Only the provider key is used for that.
