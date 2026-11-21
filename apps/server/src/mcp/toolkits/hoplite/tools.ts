@@ -1,4 +1,9 @@
 import {
+  CloudSandbox,
+  CloudSandboxCreateInput,
+  CloudSandboxIdInput,
+  CloudSandboxRunInput,
+  CloudSandboxRunResult,
   HopliteCloudAnswerInput,
   HopliteCloudPreview,
   HopliteCloudPreviewInput,
@@ -25,7 +30,7 @@ const dependencies = [
 // Status and stopping go through the task's card, with task_status and task_cancel.
 const HopliteTaskTool = Tool.make("cloud_task", {
   description:
-    "Run `prompt` as a Hoplite cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `repo` is the GitHub owner/name to work in. `model` is by id or name. Completion wakes you, so end your turn after starting it.",
+    "Run `prompt` as a cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `provider` is hoplite (default; its own agent, `model` by id or name), e2b, daytona or agent37 (Claude Code in a fresh sandbox). `repo` is the GitHub owner/name to work in. Completion wakes you, so end your turn after starting it.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
     provider: HopliteCloudStartTaskInput.fields.provider,
@@ -59,4 +64,51 @@ const HopliteTaskPreviewTool = Tool.make("cloud_preview", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.OpenWorld, true);
 
-export const HopliteToolkit = Toolkit.make(HopliteTaskTool, HopliteTaskPreviewTool);
+const SandboxCreateTool = Tool.make("sandbox_create", {
+  description:
+    "Create an empty e2b, daytona or agent37 sandbox to run commands in yourself with sandbox_run. Delete it with sandbox_delete when done.",
+  parameters: CloudSandboxCreateInput,
+  success: CloudSandbox,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Create cloud sandbox")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.OpenWorld, true);
+
+const SandboxRunTool = Tool.make("sandbox_run", {
+  description:
+    "Run a bash command in a sandbox from sandbox_create or cloud_task; returns its exit code and the last 20k characters of output.",
+  parameters: CloudSandboxRunInput,
+  success: CloudSandboxRunResult,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Run in cloud sandbox")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.OpenWorld, true);
+
+const SandboxDeleteTool = Tool.make("sandbox_delete", {
+  description: "Delete a sandbox and everything in it, including a cloud_task running there.",
+  parameters: CloudSandboxIdInput,
+  success: Schema.Struct({}),
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Delete cloud sandbox")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, true)
+  .annotate(Tool.OpenWorld, true);
+
+export const HopliteToolkit = Toolkit.make(
+  HopliteTaskTool,
+  HopliteTaskPreviewTool,
+  SandboxCreateTool,
+  SandboxRunTool,
+  SandboxDeleteTool,
+);

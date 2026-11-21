@@ -1,5 +1,10 @@
 import {
+  type CloudSandbox,
+  type CloudSandboxCreateInput,
+  type CloudSandboxIdInput,
   type CloudSandboxProvider,
+  type CloudSandboxRunInput,
+  type CloudSandboxRunResult,
   type CloudSandboxProviderStatus,
   type CloudTaskChatEvent,
   type HopliteCloudAnswerInput,
@@ -16,6 +21,7 @@ import {
   HopliteCloudThreadStatus,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import type * as Duration from "effect/Duration";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -28,13 +34,38 @@ import * as Socket from "effect/socket/Socket";
 import * as Stream from "effect/Stream";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 
+import * as HostProcess from "@t3tools/shared/HostProcess";
+
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
-import { PROVIDER_NAMES, providerOfTask } from "./CloudSandboxProviders.ts";
+import {
+  type AgentKeys,
+  type CommandResult,
+  makeSessionAdapters,
+  PROVIDER_NAMES,
+  providerOfTask,
+  type ProviderSend,
+  type SessionProvider,
+} from "./CloudSandboxProviders.ts";
+import {
+  agentTurnEnv,
+  BUSY_EXIT,
+  agentTurnScript,
+  parseTurn,
+  readTurnScript,
+  redact,
+  startedRunId,
+  STOP_SCRIPT,
+} from "./CloudSandboxTasks.ts";
 import { HOPLITE_ACP_URL, watchHopliteThreadChat } from "./HopliteTaskChat.ts";
 
 export const HOPLITE_API_BASE_URL = "https://api.hoplite.sh";
 export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
-const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = ["hoplite"];
+const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = [
+  "hoplite",
+  "e2b",
+  "daytona",
+  "agent37",
+];
 /** Hoplite keeps the name its key had before other providers were added. */
 const apiKeySecretFor = (provider: CloudSandboxProvider) =>
   provider === "hoplite" ? HOPLITE_API_KEY_SECRET : `cloud-sandbox-${provider}-api-key`;
@@ -179,7 +210,7 @@ export class HopliteCloud extends Context.Service<
       input: HopliteCloudGetTaskInput,
     ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
     readonly readTask: (
-      input: HopliteCloudGetTaskInput,
+      input: HopliteCloudGetTaskInput & { readonly runId?: string },
     ) => Effect.Effect<HopliteTaskRead, HopliteCloudError>;
     /** Returns the run the message started, or null when it waits behind the active one. */
     readonly sendMessage: (
@@ -198,6 +229,13 @@ export class HopliteCloud extends Context.Service<
     readonly answerQuestion: (
       input: HopliteCloudAnswerInput,
     ) => Effect.Effect<{ readonly runId: string | null }, HopliteCloudError>;
+    readonly createSandbox: (
+      input: CloudSandboxCreateInput,
+    ) => Effect.Effect<CloudSandbox, HopliteCloudError>;
+    readonly runInSandbox: (
+      input: CloudSandboxRunInput,
+    ) => Effect.Effect<CloudSandboxRunResult, HopliteCloudError>;
+    readonly deleteSandbox: (input: CloudSandboxIdInput) => Effect.Effect<void, HopliteCloudError>;
     /**
      * A Hoplite thread's chat: its recent history, then live activity until unsubscribed.
      * Each `activity` reloads the session on the same connection, arriving as one `replace`.
@@ -238,7 +276,12 @@ const messageFor = (code: HopliteCloudErrorCode, name: string): string => {
 // its provider's own format; URL-encoding alone still lets `..` through.
 const TASK_ID_FORMATS: Record<CloudSandboxProvider, RegExp> = {
   hoplite: /^thr_[A-Za-z0-9_-]{1,128}$/,
+  e2b: /^[a-z0-9]{1,64}$/,
+  daytona: /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/,
+  agent37: /^[a-z0-9]{1,64}$/,
 };
+const MAX_SANDBOX_OUTPUT = 20_000;
+const MAX_REMEMBERED_REQUESTS = 500;
 const HOPLITE_QUESTION_ID_FORMAT = /^q_[A-Za-z0-9_-]{1,128}$/;
 
 const invalidId = (provider: CloudSandboxProvider, what: string) =>
@@ -254,6 +297,24 @@ const taskOf = (taskId: string) => {
   return TASK_ID_FORMATS[task.provider].test(task.id)
     ? Effect.succeed(task)
     : invalidId(task.provider, "task");
+};
+
+// Each provider takes its key its own way; E2B's in-sandbox daemon gets its own token instead.
+const authorize = (
+  provider: CloudSandboxProvider,
+  request: HttpClientRequest.HttpClientRequest,
+  apiKey: string,
+) => {
+  const host = new URL(request.url).host;
+  if (provider === "e2b") {
+    return host === "api.e2b.app"
+      ? HttpClientRequest.setHeader(request, "X-API-Key", apiKey)
+      : request;
+  }
+  if (provider === "agent37" && host.endsWith(".agent37.app")) {
+    return HttpClientRequest.setHeader(request, "X-Agent37-Key", apiKey);
+  }
+  return HttpClientRequest.bearerToken(request, apiKey);
 };
 
 const failure = (code: HopliteCloudErrorCode, provider: CloudSandboxProvider = "hoplite") =>
@@ -273,6 +334,7 @@ const textDecoder = new TextDecoder();
 const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
+  const environment = yield* HostProcess.Environment;
   const random = yield* SecureRandom.SecureRandom;
 
   const readSecret = (name: string) =>
@@ -303,8 +365,9 @@ const make = Effect.gen(function* () {
     apiKey: string,
     request: HttpClientRequest.HttpClientRequest,
     schema: Schema.Codec<A, I> | null,
+    timeout: Duration.Input = REQUEST_TIMEOUT,
   ): Effect.Effect<A | undefined, HopliteCloudError> =>
-    httpClient.execute(HttpClientRequest.bearerToken(request, apiKey)).pipe(
+    httpClient.execute(authorize(provider, request, apiKey)).pipe(
       Effect.mapError(() => failure("unavailable", provider)),
       Effect.flatMap((response) =>
         response.status < 200 || response.status >= 300
@@ -316,7 +379,7 @@ const make = Effect.gen(function* () {
               ),
       ),
       Effect.timeoutOrElse({
-        duration: REQUEST_TIMEOUT,
+        duration: timeout,
         orElse: () => Effect.fail(failure("unavailable", provider)),
       }),
       Effect.tapError((error) =>
@@ -324,6 +387,118 @@ const make = Effect.gen(function* () {
       ),
       Effect.withTracerEnabled(false),
     );
+  const sendBytes = (
+    provider: SessionProvider,
+    apiKey: string,
+    request: HttpClientRequest.HttpClientRequest,
+    timeout: Duration.Input = REQUEST_TIMEOUT,
+  ): Effect.Effect<Uint8Array, HopliteCloudError> =>
+    httpClient.execute(authorize(provider, request, apiKey)).pipe(
+      Effect.mapError(() => failure("unavailable", provider)),
+      Effect.flatMap((response) =>
+        response.status < 200 || response.status >= 300
+          ? Effect.fail(failure(codeForStatus(response.status), provider))
+          : response.arrayBuffer.pipe(
+              Effect.map((buffer) => new Uint8Array(buffer)),
+              Effect.mapError(() => failure("unavailable", provider)),
+            ),
+      ),
+      Effect.timeoutOrElse({
+        duration: timeout,
+        orElse: () => Effect.fail(failure("unavailable", provider)),
+      }),
+      Effect.withTracerEnabled(false),
+    );
+  const sessions = makeSessionAdapters({
+    send: sendAs as ProviderSend,
+    sendBytes,
+    failure: (provider, code) => Effect.fail(failure(code, provider)),
+  });
+  const sessionOf = (provider: SessionProvider) => sessions[provider];
+  // The agent in a sandbox runs on this machine's model key and GitHub token.
+  const agentKeys = Effect.fn("HopliteCloud.agentKeys")(function* () {
+    const anthropicApiKey = environment.ANTHROPIC_API_KEY;
+    if (anthropicApiKey === undefined || anthropicApiKey === "") {
+      return yield* new HopliteCloudError({
+        code: "not_connected",
+        message:
+          "Set ANTHROPIC_API_KEY where T3 Code runs: the agent in the sandbox runs Claude Code on it.",
+      });
+    }
+    const githubToken = environment.GH_TOKEN || environment.GITHUB_TOKEN || undefined;
+    return { anthropicApiKey, githubToken } satisfies AgentKeys;
+  });
+  // Every key a sandbox can hold, to keep out of anything that comes back from it.
+  const sandboxSecrets = (apiKey: string) =>
+    Effect.option(agentKeys()).pipe(
+      Effect.map(
+        Option.match({
+          onNone: () => [apiKey],
+          onSome: (agent) => [apiKey, agent.anthropicApiKey, agent.githubToken],
+        }),
+      ),
+    );
+  const turnFailed = (
+    provider: SessionProvider,
+    result: CommandResult,
+    secrets: ReadonlyArray<string | undefined>,
+  ) =>
+    new HopliteCloudError({
+      code: "unavailable",
+      message: `The agent in the ${PROVIDER_NAMES[provider]} sandbox did not start: ${redact(result.output, secrets).trim().slice(-500)}`,
+    });
+  // A retry with the same clientRequestId gets the first call's result, not another sandbox or turn.
+  const remembered = <A>(
+    cache: Map<string, A>,
+    key: string | undefined,
+    effect: Effect.Effect<A, HopliteCloudError>,
+  ): Effect.Effect<A, HopliteCloudError> => {
+    if (key === undefined) return effect;
+    const hit = cache.get(key);
+    if (hit !== undefined) return Effect.succeed(hit);
+    return Effect.tap(effect, (value) =>
+      Effect.sync(() => {
+        cache.set(key, value);
+        const oldest = cache.keys().next();
+        if (cache.size > MAX_REMEMBERED_REQUESTS && oldest.done !== true)
+          cache.delete(oldest.value);
+      }),
+    );
+  };
+  const startedTasks = new Map<string, HopliteStartedTask>();
+  const sentMessages = new Map<string, { readonly runId: string | null }>();
+  const sessionTask = Effect.fn("HopliteCloud.sessionTask")(function* (
+    provider: SessionProvider,
+    id: string,
+    runId?: string,
+  ) {
+    const turnNumber = runId === undefined ? undefined : /^turn-([1-9]\d{0,8})$/.exec(runId)?.[1];
+    if (runId !== undefined && turnNumber === undefined)
+      return yield* failure("not_found", provider);
+    const apiKey = yield* keyFor(provider);
+    const result = yield* sessionOf(provider).exec(
+      apiKey,
+      id,
+      readTurnScript(turnNumber === undefined ? undefined : Number(turnNumber)),
+      {},
+    );
+    // Redacted before parsing, so neither the reply's cut nor its link can split a key.
+    const turn = parseTurn({
+      ...result,
+      output: redact(result.output, yield* sandboxSecrets(apiKey)),
+    });
+    return {
+      task: {
+        threadId: `${provider}:${id}`,
+        projectId: provider,
+        title: null,
+        status: turn.thread,
+        latestReply: turn.latestReply,
+        pullRequestUrl: turn.pullRequestUrl,
+      },
+      run: turn.run,
+    } satisfies HopliteTaskRead;
+  });
   const send = <A, I>(
     apiKey: string,
     request: HttpClientRequest.HttpClientRequest,
@@ -352,17 +527,19 @@ const make = Effect.gen(function* () {
     return projects;
   });
 
-  // One project is enough to prove the key works.
-  const verifyKey = (_provider: CloudSandboxProvider, apiKey: string) =>
-    Effect.asVoid(
-      send(
-        apiKey,
-        HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
-          HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
-        ),
-        ProjectsPage,
-      ),
-    );
+  // One project is enough to prove a Hoplite key works.
+  const verifyKey = (provider: CloudSandboxProvider, apiKey: string) =>
+    provider === "hoplite"
+      ? Effect.asVoid(
+          send(
+            apiKey,
+            HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
+              HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
+            ),
+            ProjectsPage,
+          ),
+        )
+      : sessionOf(provider).verify(apiKey);
 
   // Normalized repo -> project id, so a task skips listing every project. Cleared whenever the
   // key changes, as another key may see other projects.
@@ -481,8 +658,10 @@ const make = Effect.gen(function* () {
 
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId: taskId,
-  }: HopliteCloudGetTaskInput) {
-    const { id: threadId } = yield* taskOf(taskId);
+    runId,
+  }: HopliteCloudGetTaskInput & { readonly runId?: string }) {
+    const { provider, id: threadId } = yield* taskOf(taskId);
+    if (provider !== "hoplite") return yield* sessionTask(provider, threadId, runId);
     const apiKey = yield* requireKey;
     const [thread, activeRunId] = yield* Effect.all(
       [readThread(apiKey, threadId), readActiveRunId(apiKey, threadId)],
@@ -551,9 +730,67 @@ const make = Effect.gen(function* () {
     return project.id;
   });
 
+  const startSandboxTask = Effect.fn("HopliteCloud.startSandboxTask")(function* (
+    provider: SessionProvider,
+    input: HopliteCloudStartTaskInput,
+  ) {
+    const keys = yield* agentKeys();
+    const apiKey = yield* keyFor(provider);
+    const adapter = sessionOf(provider);
+    const id = yield* adapter.create(apiKey);
+    // A task that never started is never reported, so its sandbox goes too.
+    const removeSandbox = adapter.remove(apiKey, id).pipe(Effect.ignore);
+    const started = yield* adapter
+      .exec(
+        apiKey,
+        id,
+        agentTurnScript({ first: true }),
+        agentTurnEnv(keys, input.prompt, input.repo),
+      )
+      .pipe(Effect.tapError(() => removeSandbox));
+    if (started.exitCode !== 0) {
+      yield* removeSandbox;
+      return yield* turnFailed(provider, started, [apiKey, keys.anthropicApiKey, keys.githubToken]);
+    }
+    return {
+      task: {
+        threadId: `${provider}:${id}`,
+        projectId: input.repo ?? provider,
+        title: input.title ?? null,
+        status: "running",
+        latestReply: null,
+        pullRequestUrl: null,
+      },
+      runId: "turn-1",
+    } satisfies HopliteStartedTask;
+  });
+
   const startTask = Effect.fn("HopliteCloud.startTask")(function* (
     input: HopliteCloudStartTaskInput,
   ) {
+    const provider = input.provider ?? "hoplite";
+    if (provider !== "hoplite") {
+      if (input.model !== undefined) {
+        return yield* new HopliteCloudError({
+          code: "model_unavailable",
+          message: `The agent in a ${PROVIDER_NAMES[provider]} sandbox is Claude Code; leave \`model\` out.`,
+        });
+      }
+      return yield* remembered(
+        startedTasks,
+        // Keyed by what the task asks too, so another caller reusing an id starts its own.
+        input.clientRequestId === undefined
+          ? undefined
+          : [
+              provider,
+              input.clientRequestId,
+              input.prompt,
+              input.repo ?? "",
+              input.title ?? "",
+            ].join("\u0000"),
+        startSandboxTask(provider, input),
+      );
+    }
     const apiKey = yield* requireKey;
     if (input.repo === undefined) return yield* failure("project_required");
     const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
@@ -593,10 +830,46 @@ const make = Effect.gen(function* () {
     return { task: toTask(thread, null), runId: run?.id ?? null } satisfies HopliteStartedTask;
   });
 
+  const sendSandboxMessage = Effect.fn("HopliteCloud.sendSandboxMessage")(function* (
+    provider: SessionProvider,
+    id: string,
+    message: string,
+  ) {
+    const keys = yield* agentKeys();
+    const apiKey = yield* keyFor(provider);
+    const ran = yield* sessionOf(provider).exec(
+      apiKey,
+      id,
+      agentTurnScript({ first: false }),
+      agentTurnEnv(keys, message, undefined),
+    );
+    if (ran.exitCode === BUSY_EXIT) {
+      return yield* new HopliteCloudError({
+        code: "unavailable",
+        message:
+          "The task's agent is still on its last message. Wait for it to finish, or stop it.",
+      });
+    }
+    if (ran.exitCode !== 0) {
+      return yield* turnFailed(provider, ran, [apiKey, keys.anthropicApiKey, keys.githubToken]);
+    }
+    return { runId: startedRunId(ran) };
+  });
+
   const sendMessage = Effect.fn("HopliteCloud.sendMessage")(function* (
     input: HopliteCloudSendMessageInput,
   ) {
-    yield* taskOf(input.threadId);
+    const { provider, id } = yield* taskOf(input.threadId);
+    if (provider !== "hoplite") {
+      if (input.model !== undefined) return yield* failure("model_unavailable", provider);
+      return yield* remembered(
+        sentMessages,
+        input.clientRequestId === undefined
+          ? undefined
+          : [input.threadId, input.clientRequestId, input.message].join("\u0000"),
+        sendSandboxMessage(provider, id, input.message),
+      );
+    }
     const apiKey = yield* requireKey;
     const model = input.model === undefined ? undefined : yield* resolveModel(apiKey, input.model);
     const request = HttpClientRequest.post(`${threadPath(input.threadId)}/messages`).pipe(
@@ -613,7 +886,12 @@ const make = Effect.gen(function* () {
   const stopTask = Effect.fn("HopliteCloud.stopTask")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
-    yield* taskOf(threadId);
+    const session = yield* taskOf(threadId);
+    if (session.provider !== "hoplite") {
+      const apiKey = yield* keyFor(session.provider);
+      yield* sessionOf(session.provider).exec(apiKey, session.id, STOP_SCRIPT, {});
+      return yield* getTask({ threadId });
+    }
     const apiKey = yield* requireKey;
     // Hoplite stops only the run it is told to, so a run that finished meanwhile is never touched.
     const run = yield* readRunState(apiKey, threadId);
@@ -632,7 +910,14 @@ const make = Effect.gen(function* () {
     threadId,
     start,
   }: HopliteCloudPreviewInput) {
-    yield* taskOf(threadId);
+    const { provider } = yield* taskOf(threadId);
+    if (provider !== "hoplite") {
+      return {
+        status: "unsupported",
+        url: null,
+        reason: `${PROVIDER_NAMES[provider]} tasks have no preview here.`,
+      } satisfies HopliteCloudPreview;
+    }
     const apiKey = yield* requireKey;
     const request =
       start === true
@@ -671,14 +956,16 @@ const make = Effect.gen(function* () {
   const listQuestions = Effect.fn("HopliteCloud.listQuestions")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
-    yield* taskOf(threadId);
+    // The agent in a sandbox asks in its reply, which comes back as a follow-up.
+    if ((yield* taskOf(threadId)).provider !== "hoplite") return [];
     return yield* fetchQuestions(yield* requireKey, threadId);
   });
 
   const answerQuestion = Effect.fn("HopliteCloud.answerQuestion")(function* (
     input: HopliteCloudAnswerInput,
   ) {
-    yield* taskOf(input.threadId);
+    const { provider } = yield* taskOf(input.threadId);
+    if (provider !== "hoplite") return yield* failure("unsupported", provider);
     if (!HOPLITE_QUESTION_ID_FORMAT.test(input.questionId))
       return yield* invalidId("hoplite", "question");
     const apiKey = yield* requireKey;
@@ -717,6 +1004,38 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const sandboxOf = Effect.fn("HopliteCloud.sandboxOf")(function* (sandboxId: string) {
+    const { provider, id } = yield* taskOf(sandboxId);
+    if (provider === "hoplite") return yield* invalidId("hoplite", "sandbox");
+    return { provider, id, apiKey: yield* keyFor(provider) };
+  });
+
+  const createSandbox = Effect.fn("HopliteCloud.createSandbox")(function* ({
+    provider,
+  }: CloudSandboxCreateInput) {
+    const id = yield* sessionOf(provider).create(yield* keyFor(provider));
+    return { sandboxId: `${provider}:${id}` } satisfies CloudSandbox;
+  });
+
+  // Only the provider key is used here, but a task's sandbox may hold the agent's keys.
+  const runInSandbox = Effect.fn("HopliteCloud.runInSandbox")(function* (
+    input: CloudSandboxRunInput,
+  ) {
+    const { provider, id, apiKey } = yield* sandboxOf(input.sandboxId);
+    const result = yield* sessionOf(provider).exec(apiKey, id, input.command, {});
+    return {
+      exitCode: result.exitCode,
+      output: redact(result.output, yield* sandboxSecrets(apiKey)).slice(-MAX_SANDBOX_OUTPUT),
+    } satisfies CloudSandboxRunResult;
+  });
+
+  const deleteSandbox = Effect.fn("HopliteCloud.deleteSandbox")(function* ({
+    sandboxId,
+  }: CloudSandboxIdInput) {
+    const { provider, id, apiKey } = yield* sandboxOf(sandboxId);
+    yield* sessionOf(provider).remove(apiKey, id);
+  });
+
   return HopliteCloud.of({
     status,
     connected,
@@ -730,6 +1049,9 @@ const make = Effect.gen(function* () {
     preview,
     listQuestions,
     answerQuestion,
+    createSandbox,
+    runInSandbox,
+    deleteSandbox,
     watchThreadChat,
   });
 });

@@ -8,7 +8,7 @@ import { NodeId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
  * holding a provider's API key starts and reads tasks there; clients and agents only
  * ever see task records, never a key.
  */
-export const CloudSandboxProvider = Schema.Literals(["hoplite"]);
+export const CloudSandboxProvider = Schema.Literals(["hoplite", "e2b", "daytona", "agent37"]);
 export type CloudSandboxProvider = typeof CloudSandboxProvider.Type;
 
 const HopliteId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
@@ -206,3 +206,32 @@ export const HopliteCloudSendTaskMessageInput = Schema.Struct({
   message: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
 });
 export type HopliteCloudSendTaskMessageInput = typeof HopliteCloudSendTaskMessageInput.Type;
+
+/** E2B, Daytona and Agent37 hand out bare sandboxes an agent can work in directly. */
+export const CloudSandboxMachineProvider = Schema.Literals(["e2b", "daytona", "agent37"]);
+export type CloudSandboxMachineProvider = typeof CloudSandboxMachineProvider.Type;
+
+export const CloudSandboxCreateInput = Schema.Struct({ provider: CloudSandboxMachineProvider });
+export type CloudSandboxCreateInput = typeof CloudSandboxCreateInput.Type;
+
+export const CloudSandbox = Schema.Struct({
+  /** `<provider>:<id>`, the same id a cloud_task in that sandbox has. */
+  sandboxId: Schema.String,
+});
+export type CloudSandbox = typeof CloudSandbox.Type;
+
+export const CloudSandboxRunInput = Schema.Struct({
+  sandboxId: HopliteId,
+  /** Runs under `bash -lc`. */
+  command: TrimmedNonEmptyString.check(Schema.isMaxLength(20_000)),
+});
+export type CloudSandboxRunInput = typeof CloudSandboxRunInput.Type;
+
+export const CloudSandboxRunResult = Schema.Struct({
+  exitCode: Schema.Number,
+  output: Schema.String,
+});
+export type CloudSandboxRunResult = typeof CloudSandboxRunResult.Type;
+
+export const CloudSandboxIdInput = Schema.Struct({ sandboxId: HopliteId });
+export type CloudSandboxIdInput = typeof CloudSandboxIdInput.Type;

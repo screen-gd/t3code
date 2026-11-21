@@ -501,7 +501,12 @@ const make = Effect.gen(function* () {
     );
 
   const check = Effect.fnUntraced(function* (watch: HopliteTaskWatchEntry) {
-    const read = yield* Effect.result(hoplite.readTask({ threadId: watch.hopliteThreadId }));
+    const read = yield* Effect.result(
+      hoplite.readTask({
+        threadId: watch.hopliteThreadId,
+        ...(watch.runId === null ? {} : { runId: watch.runId }),
+      }),
+    );
     if (read._tag === "Failure") {
       // Rate limiting says nothing about the task; the next sweep tries again.
       if (read.failure.code === "rate_limited") return;
