@@ -439,10 +439,12 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
+  HopliteCloudClearClaudeCredentialInput,
   HopliteCloudConnectInput,
   CloudTaskChatEvent,
   HopliteCloudDisconnectInput,
   HopliteCloudError,
+  HopliteCloudSetClaudeCredentialInput,
   HopliteCloudStatus,
   HopliteCloudWatchTaskChatInput,
   HopliteCloudSendTaskMessageInput,
@@ -641,6 +643,8 @@ export const WS_METHODS = {
   hopliteCloudGetStatus: "hopliteCloud.getStatus",
   hopliteCloudConnect: "hopliteCloud.connect",
   hopliteCloudDisconnect: "hopliteCloud.disconnect",
+  hopliteCloudSetClaudeCredential: "hopliteCloud.setClaudeCredential",
+  hopliteCloudClearClaudeCredential: "hopliteCloud.clearClaudeCredential",
   hopliteCloudWatchTaskChat: "hopliteCloud.watchTaskChat",
   hopliteCloudSendTaskMessage: "hopliteCloud.sendTaskMessage",
   hopliteCloudStopTask: "hopliteCloud.stopTask",
@@ -1206,6 +1210,21 @@ const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, 
   success: HopliteCloudStatus,
   error: HopliteCloudRpcError,
 });
+
+const WsHopliteCloudSetClaudeCredentialRpc = Rpc.make(WS_METHODS.hopliteCloudSetClaudeCredential, {
+  payload: HopliteCloudSetClaudeCredentialInput,
+  success: HopliteCloudStatus,
+  error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudClearClaudeCredentialRpc = Rpc.make(
+  WS_METHODS.hopliteCloudClearClaudeCredential,
+  {
+    payload: HopliteCloudClearClaudeCredentialInput,
+    success: HopliteCloudStatus,
+    error: HopliteCloudRpcError,
+  },
+);
 
 const WsHopliteCloudWatchTaskChatRpc = Rpc.make(WS_METHODS.hopliteCloudWatchTaskChat, {
   payload: HopliteCloudWatchTaskChatInput,
@@ -2519,6 +2538,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsHopliteCloudGetStatusRpc,
   WsHopliteCloudConnectRpc,
   WsHopliteCloudDisconnectRpc,
+  WsHopliteCloudSetClaudeCredentialRpc,
+  WsHopliteCloudClearClaudeCredentialRpc,
   WsHopliteCloudWatchTaskChatRpc,
   WsHopliteCloudSendTaskMessageRpc,
   WsHopliteCloudStopTaskRpc,

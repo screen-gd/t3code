@@ -28,8 +28,27 @@ export const HopliteCloudStatus = Schema.Struct({
   problem: Schema.NullOr(Schema.String),
   /** Every provider, connected or not; older servers omit it. */
   providers: Schema.optional(Schema.Array(CloudSandboxProviderStatus)),
+  /** Where the Claude credential sandbox agents sign in with comes from; never its value. */
+  claude: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        source: Schema.Literals(["settings", "environment"]),
+        kind: Schema.Literals(["api_key", "subscription"]),
+      }),
+    ),
+  ),
 });
 export type HopliteCloudStatus = typeof HopliteCloudStatus.Type;
+
+export const HopliteCloudSetClaudeCredentialInput = Schema.Struct({
+  /** An Anthropic API key, or a subscription token from `claude setup-token`. */
+  credential: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+});
+export type HopliteCloudSetClaudeCredentialInput = typeof HopliteCloudSetClaudeCredentialInput.Type;
+
+export const HopliteCloudClearClaudeCredentialInput = Schema.Struct({});
+export type HopliteCloudClearClaudeCredentialInput =
+  typeof HopliteCloudClearClaudeCredentialInput.Type;
 
 export const HopliteCloudConnectInput = Schema.Struct({
   /** Omitted means Hoplite. */
@@ -60,7 +79,7 @@ export const HopliteCloudTask = Schema.Struct({
   projectId: HopliteId,
   title: Schema.NullOr(Schema.String),
   status: HopliteCloudThreadStatus,
-  /** The latest agent reply, cut to a few thousand characters. */
+  /** The latest agent reply, cut to twenty thousand characters. */
   latestReply: Schema.NullOr(Schema.String),
   pullRequestUrl: Schema.NullOr(Schema.String),
 });
@@ -80,8 +99,13 @@ export const HopliteCloudStartTaskInput = Schema.Struct({
   title: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /** A GitHub `owner/name`; the task runs in the Hoplite project that has it. */
   repo: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
-  /** Hoplite only: a model id or name, such as `gpt-6-luna` or "GPT 6 Luna"; omitted uses Hoplite's default. */
+  /**
+   * Hoplite: a model id or name, such as `gpt-6-luna` or "GPT 6 Luna". Sandbox
+   * providers: a Claude Code model such as `sonnet` or `opus`. Omitted uses the default.
+   */
   model: HopliteModel,
+  /** Sandbox providers only: the template or snapshot the sandbox is created from. */
+  template: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
   /** Makes retries create one thread. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
@@ -122,8 +146,10 @@ export type HopliteCloudQuestion = typeof HopliteCloudQuestion.Type;
 
 export const HopliteCloudPreviewInput = Schema.Struct({
   threadId: HopliteId,
-  /** Start the thread's preview server when it is not running. */
+  /** Start the thread's preview server when it is not running. Hoplite only. */
   start: Schema.optional(Schema.Boolean),
+  /** The port the sandbox serves on; sandboxes default to 3000. */
+  port: Schema.optional(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }))),
 });
 export type HopliteCloudPreviewInput = typeof HopliteCloudPreviewInput.Type;
 
@@ -211,7 +237,11 @@ export type HopliteCloudSendTaskMessageInput = typeof HopliteCloudSendTaskMessag
 export const CloudSandboxMachineProvider = Schema.Literals(["e2b", "daytona", "agent37"]);
 export type CloudSandboxMachineProvider = typeof CloudSandboxMachineProvider.Type;
 
-export const CloudSandboxCreateInput = Schema.Struct({ provider: CloudSandboxMachineProvider });
+export const CloudSandboxCreateInput = Schema.Struct({
+  provider: CloudSandboxMachineProvider,
+  /** The template or snapshot the sandbox is created from; omitted uses the provider's default. */
+  template: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(200))),
+});
 export type CloudSandboxCreateInput = typeof CloudSandboxCreateInput.Type;
 
 export const CloudSandbox = Schema.Struct({
@@ -223,7 +253,7 @@ export type CloudSandbox = typeof CloudSandbox.Type;
 export const CloudSandboxRunInput = Schema.Struct({
   sandboxId: HopliteId,
   /** Runs under `bash -lc`. */
-  command: TrimmedNonEmptyString.check(Schema.isMaxLength(20_000)),
+  command: TrimmedNonEmptyString.check(Schema.isMaxLength(100_000)),
 });
 export type CloudSandboxRunInput = typeof CloudSandboxRunInput.Type;
 

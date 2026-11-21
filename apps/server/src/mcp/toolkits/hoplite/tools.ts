@@ -30,13 +30,14 @@ const dependencies = [
 // Status and stopping go through the task's card, with task_status and task_cancel.
 const HopliteTaskTool = Tool.make("cloud_task", {
   description:
-    "Run `prompt` as a cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `provider` is hoplite (default; its own agent, `model` by id or name), e2b, daytona or agent37 (Claude Code in a fresh sandbox). `repo` is the GitHub owner/name to work in. Completion wakes you, so end your turn after starting it.",
+    "Run `prompt` as a cloud agent in its own sandbox, or send it to an earlier one's `threadId`; with `questionId` too, `prompt` answers that question. `provider` is hoplite (default; its own agent, `model` by id or name), e2b, daytona or agent37 (Claude Code in a fresh sandbox, `model` a Claude Code model such as sonnet or opus, `template` the image or snapshot the sandbox is created from). `repo` is the GitHub owner/name to work in. Completion wakes you, so end your turn after starting it.",
   parameters: Schema.Struct({
     prompt: HopliteCloudStartTaskInput.fields.prompt,
     provider: HopliteCloudStartTaskInput.fields.provider,
     threadId: Schema.optional(HopliteCloudSendMessageInput.fields.threadId),
     questionId: Schema.optional(HopliteCloudAnswerInput.fields.questionId),
     model: HopliteCloudStartTaskInput.fields.model,
+    template: HopliteCloudStartTaskInput.fields.template,
     title: HopliteCloudStartTaskInput.fields.title,
     repo: HopliteCloudStartTaskInput.fields.repo,
     clientRequestId: HopliteCloudStartTaskInput.fields.clientRequestId,
@@ -52,7 +53,8 @@ const HopliteTaskTool = Tool.make("cloud_task", {
   .annotate(Tool.OpenWorld, true);
 
 const HopliteTaskPreviewTool = Tool.make("cloud_preview", {
-  description: "A Hoplite cloud_task's app preview URL. `start` launches a stopped one.",
+  description:
+    "A cloud_task's preview URL for the app it serves on `port` (default 3000). `start` launches a stopped one on Hoplite.",
   parameters: HopliteCloudPreviewInput,
   success: HopliteCloudPreview,
   failure: OrchestratorMcpFailure,
@@ -66,7 +68,7 @@ const HopliteTaskPreviewTool = Tool.make("cloud_preview", {
 
 const SandboxCreateTool = Tool.make("sandbox_create", {
   description:
-    "Create an empty e2b, daytona or agent37 sandbox to run commands in yourself with sandbox_run. Delete it with sandbox_delete when done.",
+    "Create an empty e2b, daytona or agent37 sandbox to run commands in yourself with sandbox_run; `template` names the image or snapshot it is created from. Delete it with sandbox_delete when done.",
   parameters: CloudSandboxCreateInput,
   success: CloudSandbox,
   failure: OrchestratorMcpFailure,
@@ -80,7 +82,7 @@ const SandboxCreateTool = Tool.make("sandbox_create", {
 
 const SandboxRunTool = Tool.make("sandbox_run", {
   description:
-    "Run a bash command in a sandbox from sandbox_create or cloud_task; returns its exit code and the last 20k characters of output.",
+    "Run a bash command in a sandbox from sandbox_create or cloud_task; returns its exit code and the last 100k characters of output.",
   parameters: CloudSandboxRunInput,
   success: CloudSandboxRunResult,
   failure: OrchestratorMcpFailure,

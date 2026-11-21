@@ -97,6 +97,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   // Cloud sandbox keys are the controller's: only settings writers may replace them.
   [WS_METHODS.hopliteCloudConnect]: AuthSettingsWriteScope,
   [WS_METHODS.hopliteCloudDisconnect]: AuthSettingsWriteScope,
+  [WS_METHODS.hopliteCloudSetClaudeCredential]: AuthSettingsWriteScope,
+  [WS_METHODS.hopliteCloudClearClaudeCredential]: AuthSettingsWriteScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
