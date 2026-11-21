@@ -147,7 +147,7 @@ it.effect("logs in to Hoplite's ACP connection before loading the thread", () =>
   }),
 );
 
-const subagent = (service: "hoplite" | undefined) =>
+const subagent = (service: "hoplite" | "daytona" | undefined, threadId = "thr_remote") =>
   ({
     id: NodeId.make("task-1"),
     threadId: ThreadId.make("parent"),
@@ -155,22 +155,22 @@ const subagent = (service: "hoplite" | undefined) =>
       service === undefined
         ? undefined
         : {
-            environmentId: EnvironmentId.make("hoplite"),
-            threadId: ThreadId.make("thr_remote"),
-            label: "Hoplite",
+            environmentId: EnvironmentId.make(service),
+            threadId: ThreadId.make(threadId),
+            label: service,
             service,
           },
   }) as unknown as OrchestrationV2Subagent;
 
-it.effect("streams only tasks delegated to Hoplite from this thread", () =>
+it.effect("streams only tasks delegated to a cloud sandbox from this thread", () =>
   Effect.gen(function* () {
     const watched: Array<string> = [];
     const watch = (task: OrchestrationV2Subagent | undefined) =>
       watchTaskChat(
         {
           readTask: () => Effect.succeed(task),
-          watchThreadChat: (hopliteThreadId) => {
-            watched.push(hopliteThreadId);
+          watchThreadChat: (taskId) => {
+            watched.push(taskId);
             return Stream.make({ _tag: "live" as const });
           },
         },
@@ -188,15 +188,26 @@ it.effect("streams only tasks delegated to Hoplite from this thread", () =>
     const events = yield* watchTaskChat(
       {
         readTask: () => Effect.succeed(subagent("hoplite")),
-        watchThreadChat: (hopliteThreadId) => {
-          watched.push(hopliteThreadId);
+        watchThreadChat: (taskId) => {
+          watched.push(taskId);
           return Stream.make({ _tag: "live" as const });
         },
       },
       { threadId: ThreadId.make("parent"), taskId: NodeId.make("task-1") },
     ).pipe(Stream.runCollect);
     assert.deepStrictEqual(events, [{ _tag: "live" }]);
-    assert.deepStrictEqual(watched, ["thr_remote"]);
+    // A sandbox task resolves to its provider:id thread the same way.
+    yield* watchTaskChat(
+      {
+        readTask: () => Effect.succeed(subagent("daytona", "daytona:dsb-1")),
+        watchThreadChat: (taskId) => {
+          watched.push(taskId);
+          return Stream.make({ _tag: "live" as const });
+        },
+      },
+      { threadId: ThreadId.make("parent"), taskId: NodeId.make("task-1") },
+    ).pipe(Stream.runCollect);
+    assert.deepStrictEqual(watched, ["thr_remote", "daytona:dsb-1"]);
   }),
 );
 

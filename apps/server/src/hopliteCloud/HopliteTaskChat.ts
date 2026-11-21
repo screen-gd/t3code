@@ -253,15 +253,15 @@ type ReadTask<E> = (
   input: HopliteCloudWatchTaskChatInput,
 ) => Effect.Effect<OrchestrationV2Subagent | undefined, E>;
 
-/** A delegated task's Hoplite thread, so clients only reach tasks of threads they can see here. */
-export const resolveHopliteTask = <E>(
+/** A delegated task's cloud thread, so clients only reach tasks of threads they can see here. */
+export const resolveCloudTask = <E>(
   readTask: ReadTask<E>,
   input: HopliteCloudWatchTaskChatInput,
 ): Effect.Effect<string, HopliteCloudError> =>
   readTask(input).pipe(
     Effect.orElseSucceed(() => undefined),
     Effect.flatMap((task) =>
-      task?.remoteChild?.service === "hoplite"
+      task?.remoteChild?.service !== undefined
         ? Effect.succeed(task.remoteChild.threadId)
         : Effect.fail(
             new HopliteCloudError({
@@ -269,7 +269,7 @@ export const resolveHopliteTask = <E>(
               message:
                 task === undefined
                   ? "This thread has no such task."
-                  : "Only tasks delegated to Hoplite open here.",
+                  : "Only tasks delegated to a cloud sandbox open here.",
             }),
           ),
     ),
@@ -279,9 +279,9 @@ export const watchTaskChat = <E>(
   deps: {
     readonly readTask: ReadTask<E>;
     readonly watchThreadChat: (
-      hopliteThreadId: string,
+      taskId: string,
     ) => Stream.Stream<CloudTaskChatEvent, HopliteCloudError>;
   },
   input: HopliteCloudWatchTaskChatInput,
 ): Stream.Stream<CloudTaskChatEvent, HopliteCloudError> =>
-  Stream.unwrap(Effect.map(resolveHopliteTask(deps.readTask, input), deps.watchThreadChat));
+  Stream.unwrap(Effect.map(resolveCloudTask(deps.readTask, input), deps.watchThreadChat));
