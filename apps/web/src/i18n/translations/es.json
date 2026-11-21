@@ -12489,5 +12489,7 @@
   "ddfa18d485474c30": "The credential could not be saved.",
   "eb474d5fb2aa3085": "Claude for sandboxes",
   "1deb32271be14520": "Paste an Anthropic API key, or run `claude setup-token` and paste its token to use a Claude plan.",
-  "e033591b273697aa": "API key or setup-token"
+  "e033591b273697aa": "API key or setup-token",
+  "0a8bf9e56819c4f4": "Codex for sandboxes",
+  "a22795377698ca95": "Paste an OpenAI API key."
 }

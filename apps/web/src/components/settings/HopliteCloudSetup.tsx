@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type {
+  CloudSandboxAgent,
   CloudSandboxProvider,
   CloudSandboxProviderStatus,
   EnvironmentId,
@@ -188,30 +189,31 @@ function HopliteCloudSetup({ provider }: { provider: CloudSandboxProvider }) {
 }
 
 /**
- * The Claude login every sandbox agent signs in with. A saved one wins over this
+ * The login one sandbox agent signs in with. A saved one wins over this
  * machine's environment; the row never shows the credential itself.
  */
-function ClaudeCredentialRow(props: {
+function AgentCredentialRow(props: {
   readonly environmentId: EnvironmentId;
   readonly status: HopliteCloudStatus;
+  readonly agent: CloudSandboxAgent;
   readonly refresh: () => void;
 }) {
   const gt = useGT();
-  const save = useAtomCommand(hopliteCloudEnvironment.setClaudeCredential, {
+  const save = useAtomCommand(hopliteCloudEnvironment.setAgentCredential, {
     reportFailure: false,
   });
-  const clear = useAtomCommand(hopliteCloudEnvironment.clearClaudeCredential, {
+  const clear = useAtomCommand(hopliteCloudEnvironment.clearAgentCredential, {
     reportFailure: false,
   });
   const [credential, setCredential] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const claude = props.status.claude ?? null;
+  const saved = props.status[props.agent] ?? null;
   const label =
-    claude === null
+    saved === null
       ? gt("Not set")
-      : claude.source === "settings"
-        ? claude.kind === "api_key"
+      : saved.source === "settings"
+        ? saved.kind === "api_key"
           ? gt("Saved API key")
           : gt("Saved subscription token")
         : gt("From this machine's environment");
@@ -232,17 +234,19 @@ function ClaudeCredentialRow(props: {
 
   return (
     <SettingsRow
-      title={gt("Claude for sandboxes")}
+      title={props.agent === "codex" ? gt("Codex for sandboxes") : gt("Claude for sandboxes")}
       description={
         <span className="flex flex-col gap-1">
           <span className="flex items-center gap-1.5">
-            {claude !== null ? <ConnectionStatusDot dotClassName="bg-success" /> : null}
+            {saved !== null ? <ConnectionStatusDot dotClassName="bg-success" /> : null}
             {label}
           </span>
           <span>
-            {gt(
-              "Paste an Anthropic API key, or run `claude setup-token` and paste its token to use a Claude plan.",
-            )}
+            {props.agent === "codex"
+              ? gt("Paste an OpenAI API key.")
+              : gt(
+                  "Paste an Anthropic API key, or run `claude setup-token` and paste its token to use a Claude plan.",
+                )}
           </span>
           {error ? <span className="text-destructive">{error}</span> : null}
         </span>
@@ -267,20 +271,22 @@ function ClaudeCredentialRow(props: {
               void run(() =>
                 save({
                   environmentId: props.environmentId,
-                  input: { credential: credential.trim() },
+                  input: { agent: props.agent, credential: credential.trim() },
                 }),
               )
             }
           >
             {pending ? gt("Saving…") : gt("Save")}
           </Button>
-          {claude?.source === "settings" ? (
+          {saved?.source === "settings" ? (
             <Button
               size="sm"
               variant="outline"
               disabled={pending}
               onClick={() =>
-                void run(() => clear({ environmentId: props.environmentId, input: {} }))
+                void run(() =>
+                  clear({ environmentId: props.environmentId, input: { agent: props.agent } }),
+                )
               }
             >
               <T>Remove</T>
@@ -366,11 +372,20 @@ export function HopliteCloudSection() {
             );
           })}
           {environmentId === null ? null : (
-            <ClaudeCredentialRow
-              environmentId={environmentId}
-              status={status}
-              refresh={query.refresh}
-            />
+            <>
+              <AgentCredentialRow
+                environmentId={environmentId}
+                status={status}
+                agent="claude"
+                refresh={query.refresh}
+              />
+              <AgentCredentialRow
+                environmentId={environmentId}
+                status={status}
+                agent="codex"
+                refresh={query.refresh}
+              />
+            </>
           )}
         </>
       )}
