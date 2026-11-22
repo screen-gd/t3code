@@ -120,6 +120,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.hopliteCloudGetStatus]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudConnect]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudDisconnect]: "hoplite-cloud",
+  [WS_METHODS.hopliteCloudSetAgentCredential]: "hoplite-cloud",
+  [WS_METHODS.hopliteCloudClearAgentCredential]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudWatchTaskChat]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudSendTaskMessage]: "hoplite-cloud",
   [WS_METHODS.hopliteCloudStopTask]: "hoplite-cloud",

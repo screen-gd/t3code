@@ -236,8 +236,11 @@ const make = Effect.gen(function* () {
     ),
     Effect.catchCause((cause) => Effect.logWarning("hoplite-cloud.watch-save-failed", { cause })),
   );
+  // Watches on one task differ by card, so a follow-up's card never replaces turn one's.
   const sameTask = (a: HopliteTaskWatchEntry, b: HopliteTaskWatchEntry) =>
-    a.callerThreadId === b.callerThreadId && a.hopliteThreadId === b.hopliteThreadId;
+    a.callerThreadId === b.callerThreadId &&
+    a.hopliteThreadId === b.hopliteThreadId &&
+    a.taskId === b.taskId;
   // The failure count is not worth a write; after a restart it starts again from zero.
   const sameButFailures = (a: HopliteTaskWatchEntry, b: HopliteTaskWatchEntry) => {
     const fields = new Set([...Object.keys(a), ...Object.keys(b)] as Array<keyof typeof a>);
@@ -245,7 +248,7 @@ const make = Effect.gen(function* () {
     return [...fields].every((field) => a[field] === b[field]);
   };
 
-  /** Replaces any watch on the same task by the same caller; false when full. */
+  /** Replaces only a watch for the same card on the same task by the same caller; false when full. */
   const add = (watch: HopliteTaskWatchEntry) =>
     Ref.modify(watches, (current) => {
       const others = current.filter((entry) => !sameTask(entry, watch));

@@ -194,6 +194,19 @@ it.effect("a rejected key is never saved and its text stays out of the error", (
   }).pipe(Effect.provide(harness.layer));
 });
 
+it.effect("rejects an agent choice it cannot honor", () => {
+  const harness = makeHarness();
+  return Effect.gen(function* () {
+    const hoplite = yield* HopliteCloud.HopliteCloud;
+    yield* hoplite.connect("hoplite", GOOD_KEY);
+    const error = yield* Effect.flip(
+      hoplite.startTask({ prompt: "Fix", repo: "acme/api", agent: "codex" }),
+    );
+    assert.equal(error.code, "unsupported");
+    assert.include(error.message, "own agent");
+  }).pipe(Effect.provide(harness.layer));
+});
+
 it.effect("connecting checks the key, and a task starts in the repo's project", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {

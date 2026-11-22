@@ -268,7 +268,7 @@ import * as PullRequestSyncReactor from "./orchestration-v2/PullRequestSyncReact
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as OtlpEndpointCheck from "./observability/OtlpEndpointCheck.ts";
 import * as HopliteCloud from "./hopliteCloud/HopliteCloudService.ts";
-import { resolveHopliteTask, watchTaskChat, withRunning } from "./hopliteCloud/HopliteTaskChat.ts";
+import { resolveCloudTask, watchTaskChat, withRunning } from "./hopliteCloud/HopliteTaskChat.ts";
 import * as HopliteTaskWatch from "./hopliteCloud/HopliteTaskWatch.ts";
 import * as TextGenerators from "./textGeneration/TextGenerators.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
@@ -2813,37 +2813,36 @@ export const layerWsRpc = (
           hopliteCloud.connect(input.provider ?? "hoplite", input.apiKey),
         [WS_METHODS.hopliteCloudDisconnect]: (input) =>
           hopliteCloud.disconnect(input.provider ?? "hoplite"),
+        [WS_METHODS.hopliteCloudSetAgentCredential]: (input) =>
+          hopliteCloud.setAgentCredential(input.agent, input.credential),
+        [WS_METHODS.hopliteCloudClearAgentCredential]: (input) =>
+          hopliteCloud.clearAgentCredential(input.agent),
         [WS_METHODS.hopliteCloudWatchTaskChat]: (input) =>
           watchTaskChat(
             {
               readTask: readDelegatedTask,
-              watchThreadChat: (hopliteThreadId) =>
+              watchThreadChat: (taskId) =>
                 withRunning(
-                  hopliteCloud.watchThreadChat(
-                    hopliteThreadId,
-                    hopliteTaskWatch.threadActivity(hopliteThreadId),
-                  ),
-                  hopliteTaskWatch.watching(hopliteThreadId),
+                  hopliteCloud.watchThreadChat(taskId, hopliteTaskWatch.threadActivity(taskId)),
+                  hopliteTaskWatch.watching(taskId),
                 ),
             },
             input,
           ),
         // Sent as the delegating thread, so its task card follows the new run like an agent's follow-up.
         [WS_METHODS.hopliteCloudSendTaskMessage]: (input) =>
-          resolveHopliteTask(readDelegatedTask, input).pipe(
-            Effect.flatMap((hopliteThreadId) =>
+          resolveCloudTask(readDelegatedTask, input).pipe(
+            Effect.flatMap((taskId) =>
               hopliteTaskWatch.sendMessage(
-                { threadId: hopliteThreadId, message: input.message },
+                { threadId: taskId, message: input.message },
                 input.threadId,
               ),
             ),
             Effect.asVoid,
           ),
         [WS_METHODS.hopliteCloudStopTask]: (input) =>
-          resolveHopliteTask(readDelegatedTask, input).pipe(
-            Effect.flatMap((hopliteThreadId) =>
-              hopliteTaskWatch.stopTask({ threadId: hopliteThreadId }),
-            ),
+          resolveCloudTask(readDelegatedTask, input).pipe(
+            Effect.flatMap((taskId) => hopliteTaskWatch.stopTask({ threadId: taskId })),
             Effect.asVoid,
           ),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,

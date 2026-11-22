@@ -50,6 +50,12 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
     answers: Array<string>;
     /** Every read fails with this while set. */
     readError: HopliteCloudError | null;
+    /** Run-state per run id, for reads that name one; others fall back to `run`. */
+    byRun: Record<string, HopliteCloud.HopliteRun | null>;
+    /** Run ids sendMessage hands back, in order; the default is none. */
+    sendRunIds: Array<string | null>;
+    /** Card ids recordCard returns, in order; the default is "node:card". */
+    cardIds: Array<string>;
     connected: boolean;
     /** Writes of the saved watch list. */
     saves: number;
@@ -62,6 +68,9 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
     questions: [],
     answers: [],
     readError: null,
+    byRun: {},
+    sendRunIds: [],
+    cardIds: [],
     connected: true,
     saves: 0,
   };
@@ -71,13 +80,19 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
       Layer.mock(HopliteCloud.HopliteCloud)({
         startTask: () => Effect.succeed({ task: { ...task, status: "queued" }, runId: "run_1" }),
         connected: Effect.sync(() => state.connected),
-        readTask: () =>
+        readTask: (input) =>
           Effect.suspend(() =>
             state.readError === null
-              ? Effect.succeed({ task: { ...task, latestReply: state.reply }, run: state.run })
+              ? Effect.succeed({
+                  task: { ...task, latestReply: state.reply },
+                  run:
+                    input?.runId !== undefined && input.runId in state.byRun
+                      ? state.byRun[input.runId]!
+                      : state.run,
+                })
               : Effect.fail(state.readError),
           ),
-        sendMessage: () => Effect.succeed({ runId: null }),
+        sendMessage: () => Effect.sync(() => ({ runId: state.sendRunIds.shift() ?? null })),
         stopTask: () => Effect.sync(() => (state.stops++, task)),
         listQuestions: () => Effect.sync(() => state.questions),
         answerQuestion: (input) =>
@@ -91,7 +106,14 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
             dispatched.push(command);
             const storedEvents =
               command.type === "delegated_task.remote.request"
-                ? [{ event: { type: "subagent.updated", payload: { id: "node:card" } } }]
+                ? [
+                    {
+                      event: {
+                        type: "subagent.updated",
+                        payload: { id: state.cardIds.shift() ?? "node:card" },
+                      },
+                    },
+                  ]
                 : [];
             return { sequence: dispatched.length, storedEvents } as never;
           }),
@@ -313,6 +335,45 @@ it.effect("stopping a task, or starting one outside an agent thread, wakes nothi
     harness.state.run = { id: "run_1", status: "cancelled" };
     yield* watch.sweep;
     assert.deepStrictEqual(wakes(harness.dispatched), []);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("two cards on one task keep their own watch and settle from their own run", () => {
+  const harness = makeHarness();
+  harness.state.runs = [activeRun];
+  harness.state.sendRunIds = ["run_1", "run_2"];
+  harness.state.cardIds = ["node:card1", "node:card2"];
+  return Effect.gen(function* () {
+    const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    yield* watch.sendMessage({ threadId: "thr_1", message: "First part" }, "t3-thread");
+    yield* watch.sendMessage({ threadId: "thr_1", message: "Second part" }, "t3-thread");
+
+    harness.state.byRun = { run_1: { id: "run_1", status: "completed" } };
+    yield* watch.sweep;
+    // Only the first card's run settled; the follow-up's card is still watched.
+    assert.deepStrictEqual(
+      harness.dispatched.flatMap((command) =>
+        command.type === "delegated_task.remote.complete" ? [command.taskId] : [],
+      ),
+      [NodeId.make("node:card1")],
+    );
+    assert.isTrue(yield* watch.watching("thr_1"));
+
+    harness.state.byRun = {
+      run_1: { id: "run_1", status: "completed" },
+      run_2: { id: "run_2", status: "failed" },
+    };
+    yield* watch.sweep;
+    assert.deepStrictEqual(
+      harness.dispatched.flatMap((command) =>
+        command.type === "delegated_task.remote.complete" ? [[command.taskId, command.status]] : [],
+      ),
+      [
+        [NodeId.make("node:card1"), "completed"],
+        [NodeId.make("node:card2"), "failed"],
+      ],
+    );
+    assert.isFalse(yield* watch.watching("thr_1"));
   }).pipe(Effect.provide(harness.layer));
 });
 

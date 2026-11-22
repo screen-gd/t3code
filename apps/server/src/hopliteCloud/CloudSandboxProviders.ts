@@ -1,4 +1,5 @@
 import type {
+  CloudSandboxAgent,
   CloudSandboxProvider,
   HopliteCloudError,
   HopliteCloudErrorCode,
@@ -44,7 +45,12 @@ export const providerOfTask = (
 
 /** What goes into a sandbox so the agent there can work: never logged or returned. */
 export interface AgentKeys {
-  readonly anthropicApiKey: string;
+  /** The one credential the sandbox's agent signs in with, under the variable it reads. */
+  readonly agent: {
+    readonly name: CloudSandboxAgent;
+    readonly variable: "ANTHROPIC_API_KEY" | "CLAUDE_CODE_OAUTH_TOKEN" | "CODEX_API_KEY";
+    readonly value: string;
+  };
   readonly githubToken: string | undefined;
 }
 
@@ -75,16 +81,28 @@ export interface CommandResult {
   readonly output: string;
 }
 
+export interface SandboxPreview {
+  readonly status: "ready" | "unsupported";
+  readonly url: string | null;
+  readonly reason: string | null;
+}
+
 export interface SessionAdapter {
   /** Fails when the key does not work. */
   readonly verify: (apiKey: string) => Effect.Effect<void, HopliteCloudError>;
-  readonly create: (apiKey: string) => Effect.Effect<string, HopliteCloudError>;
+  readonly create: (apiKey: string, template?: string) => Effect.Effect<string, HopliteCloudError>;
   readonly exec: (
     apiKey: string,
     id: string,
     command: string,
     envs: Readonly<Record<string, string>>,
   ) => Effect.Effect<CommandResult, HopliteCloudError>;
+  /** A link to what the sandbox serves on `port`; `unsupported` when it cannot give one. */
+  readonly preview: (
+    apiKey: string,
+    id: string,
+    port: number,
+  ) => Effect.Effect<SandboxPreview, HopliteCloudError>;
   readonly remove: (apiKey: string, id: string) => Effect.Effect<void, HopliteCloudError>;
 }
 
@@ -175,13 +193,17 @@ const makeE2b = ({ send, sendBytes, failure }: Deps): SessionAdapter => ({
     Effect.asVoid(
       send("e2b", apiKey, HttpClientRequest.get(`${E2B_API_BASE_URL}/v2/sandboxes`), null),
     ),
-  create: (apiKey) =>
+  create: (apiKey, template) =>
     send(
       "e2b",
       apiKey,
       HttpClientRequest.post(`${E2B_API_BASE_URL}/sandboxes`).pipe(
-        // An hour, E2B's longest for most plans; follow-ups extend it.
-        HttpClientRequest.bodyJsonUnsafe({ templateID: "base", timeout: 3600 }),
+        // An hour, E2B's longest for most plans; autoPause keeps the sandbox instead of deleting it.
+        HttpClientRequest.bodyJsonUnsafe({
+          templateID: template ?? "base",
+          timeout: 3600,
+          autoPause: true,
+        }),
       ),
       E2bCreated,
     ).pipe(Effect.map((created) => created!.sandboxID)),
@@ -210,6 +232,22 @@ const makeE2b = ({ send, sendBytes, failure }: Deps): SessionAdapter => ({
     const result = readConnectStream(yield* sendBytes("e2b", apiKey, request, COMMAND_TIMEOUT));
     return result ?? (yield* failure("e2b", "unavailable"));
   }),
+  // Connect resumes a paused sandbox and says which domain serves it.
+  preview: (apiKey, id, port) =>
+    send(
+      "e2b",
+      apiKey,
+      HttpClientRequest.post(`${E2B_API_BASE_URL}/sandboxes/${id}/connect`).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ timeout: 3600 }),
+      ),
+      E2bConnected,
+    ).pipe(
+      Effect.map((connected) => ({
+        status: "ready" as const,
+        url: `https://${port.toString()}-${id}.${connected?.domain ?? "e2b.app"}`,
+        reason: null,
+      })),
+    ),
   remove: (apiKey, id) =>
     Effect.asVoid(
       send("e2b", apiKey, HttpClientRequest.delete(`${E2B_API_BASE_URL}/sandboxes/${id}`), null),
@@ -221,39 +259,51 @@ const DaytonaExecuted = Schema.Struct({
   exitCode: Schema.optional(Schema.Number),
   result: Schema.String,
 });
+const DaytonaPreview = Schema.Struct({ url: Schema.String });
 
 /** Daytona runs commands through its toolbox proxy, on the same key. */
-const makeDaytona = ({ send, failure }: Deps): SessionAdapter => ({
-  verify: (apiKey) =>
-    Effect.asVoid(
-      send("daytona", apiKey, HttpClientRequest.get(`${DAYTONA_API_BASE_URL}/sandbox`), null),
-    ),
-  create: Effect.fn("CloudSandbox.daytona.create")(function* (apiKey) {
-    const created = yield* send(
+const makeDaytona = ({ send, failure }: Deps): SessionAdapter => {
+  const sandboxOf = (apiKey: string, id: string) =>
+    send(
       "daytona",
       apiKey,
-      HttpClientRequest.post(`${DAYTONA_API_BASE_URL}/sandbox`).pipe(
-        // Stop after an idle hour rather than Daytona's 15 minutes, so a task can finish.
-        HttpClientRequest.bodyJsonUnsafe({ autoStopInterval: 60 }),
-      ),
+      HttpClientRequest.get(`${DAYTONA_API_BASE_URL}/sandbox/${id}`),
       DaytonaSandbox,
     );
-    // Creation can return before the sandbox runs; commands fail until it does.
+
+  // Creation, start and restore can return before the sandbox runs; commands fail until
+  // it does. A stopped or archived one gets a single start request, then the same wait.
+  const ensureStarted = Effect.fn("CloudSandbox.daytona.ensureStarted")(function* (
+    apiKey: string,
+    id: string,
+  ) {
+    let asked = false;
     for (let attempt = 0; attempt < 60; attempt++) {
-      const sandbox = yield* send(
-        "daytona",
-        apiKey,
-        HttpClientRequest.get(`${DAYTONA_API_BASE_URL}/sandbox/${created!.id}`),
-        DaytonaSandbox,
-      );
-      if (sandbox!.state === "started") return created!.id;
+      const sandbox = yield* sandboxOf(apiKey, id);
+      if (sandbox!.state === "started") return;
       if (sandbox!.state === "error" || sandbox!.state === "build_failed")
         return yield* failure("daytona", "unavailable");
+      if ((sandbox!.state === "stopped" || sandbox!.state === "archived") && !asked) {
+        asked = true;
+        yield* send(
+          "daytona",
+          apiKey,
+          HttpClientRequest.post(`${DAYTONA_API_BASE_URL}/sandbox/${id}/start`),
+          null,
+        );
+        continue;
+      }
       yield* Effect.sleep("2 seconds");
     }
     return yield* failure("daytona", "unavailable");
-  }),
-  exec: (apiKey, id, command, envs) =>
+  });
+
+  const execute = (
+    apiKey: string,
+    id: string,
+    command: string,
+    envs: Readonly<Record<string, string>>,
+  ) =>
     send(
       "daytona",
       apiKey,
@@ -266,17 +316,52 @@ const makeDaytona = ({ send, failure }: Deps): SessionAdapter => ({
       ),
       DaytonaExecuted,
       COMMAND_TIMEOUT,
-    ).pipe(Effect.map((done) => ({ exitCode: done!.exitCode ?? 0, output: done!.result }))),
-  remove: (apiKey, id) =>
-    Effect.asVoid(
+    ).pipe(Effect.map((done) => ({ exitCode: done!.exitCode ?? 0, output: done!.result })));
+
+  return {
+    verify: (apiKey) =>
+      Effect.asVoid(
+        send("daytona", apiKey, HttpClientRequest.get(`${DAYTONA_API_BASE_URL}/sandbox`), null),
+      ),
+    create: Effect.fn("CloudSandbox.daytona.create")(function* (apiKey, template) {
+      const created = yield* send(
+        "daytona",
+        apiKey,
+        HttpClientRequest.post(`${DAYTONA_API_BASE_URL}/sandbox`).pipe(
+          // Stop after an idle hour rather than Daytona's 15 minutes, so a task can finish.
+          HttpClientRequest.bodyJsonUnsafe({
+            autoStopInterval: 60,
+            ...(template === undefined ? {} : { snapshot: template }),
+          }),
+        ),
+        DaytonaSandbox,
+      );
+      yield* ensureStarted(apiKey, created!.id);
+      return created!.id;
+    }),
+    // The command runs exactly once, so a retried sandbox never replays its side effects.
+    exec: (apiKey, id, command, envs) =>
+      ensureStarted(apiKey, id).pipe(Effect.andThen(execute(apiKey, id, command, envs))),
+    preview: (apiKey, id, port) =>
       send(
         "daytona",
         apiKey,
-        HttpClientRequest.delete(`${DAYTONA_API_BASE_URL}/sandbox/${id}`),
-        null,
+        HttpClientRequest.get(
+          `${DAYTONA_API_BASE_URL}/sandbox/${id}/ports/${port.toString()}/signed-preview-url`,
+        ).pipe(HttpClientRequest.setUrlParams({ expiresInSeconds: "86400" })),
+        DaytonaPreview,
+      ).pipe(Effect.map((done) => ({ status: "ready" as const, url: done!.url, reason: null }))),
+    remove: (apiKey, id) =>
+      Effect.asVoid(
+        send(
+          "daytona",
+          apiKey,
+          HttpClientRequest.delete(`${DAYTONA_API_BASE_URL}/sandbox/${id}`),
+          null,
+        ),
       ),
-    ),
-});
+  };
+};
 
 const Agent37Instance = Schema.Struct({ id: Schema.String });
 const Agent37Executed = Schema.Struct({
@@ -293,14 +378,14 @@ const makeAgent37 = ({ send }: Deps): SessionAdapter => ({
     Effect.asVoid(
       send("agent37", apiKey, HttpClientRequest.get(`${AGENT37_API_BASE_URL}/instances`), null),
     ),
-  create: (apiKey) =>
+  create: (apiKey, template) =>
     send(
       "agent37",
       apiKey,
       HttpClientRequest.post(`${AGENT37_API_BASE_URL}/instances`).pipe(
         // Exec polls reset Agent37's idle timer; background CPU work alone does not.
         HttpClientRequest.bodyJsonUnsafe({
-          template: "agent37-claude-code",
+          template: template ?? "agent37-claude-code",
           auto_sleep: true,
           idle_timeout_seconds: 3600,
         }),
@@ -324,6 +409,12 @@ const makeAgent37 = ({ send }: Deps): SessionAdapter => ({
         output: done!.output ?? `${done!.stdout ?? ""}${done!.stderr ?? ""}`,
       })),
     ),
+  preview: (_apiKey, _id, _port) =>
+    Effect.succeed({
+      status: "unsupported" as const,
+      url: null,
+      reason: "Agent37 has no preview links.",
+    }),
   remove: (apiKey, id) =>
     Effect.asVoid(
       send(

@@ -439,10 +439,12 @@ import {
 } from "./scheduledTask.ts";
 import { SecretRequestAnswerInput, SecretRequestError } from "./secretRequest.ts";
 import {
+  HopliteCloudClearAgentCredentialInput,
   HopliteCloudConnectInput,
   CloudTaskChatEvent,
   HopliteCloudDisconnectInput,
   HopliteCloudError,
+  HopliteCloudSetAgentCredentialInput,
   HopliteCloudStatus,
   HopliteCloudWatchTaskChatInput,
   HopliteCloudSendTaskMessageInput,
@@ -641,6 +643,8 @@ export const WS_METHODS = {
   hopliteCloudGetStatus: "hopliteCloud.getStatus",
   hopliteCloudConnect: "hopliteCloud.connect",
   hopliteCloudDisconnect: "hopliteCloud.disconnect",
+  hopliteCloudSetAgentCredential: "hopliteCloud.setAgentCredential",
+  hopliteCloudClearAgentCredential: "hopliteCloud.clearAgentCredential",
   hopliteCloudWatchTaskChat: "hopliteCloud.watchTaskChat",
   hopliteCloudSendTaskMessage: "hopliteCloud.sendTaskMessage",
   hopliteCloudStopTask: "hopliteCloud.stopTask",
@@ -1206,6 +1210,21 @@ const WsHopliteCloudDisconnectRpc = Rpc.make(WS_METHODS.hopliteCloudDisconnect, 
   success: HopliteCloudStatus,
   error: HopliteCloudRpcError,
 });
+
+const WsHopliteCloudSetAgentCredentialRpc = Rpc.make(WS_METHODS.hopliteCloudSetAgentCredential, {
+  payload: HopliteCloudSetAgentCredentialInput,
+  success: HopliteCloudStatus,
+  error: HopliteCloudRpcError,
+});
+
+const WsHopliteCloudClearAgentCredentialRpc = Rpc.make(
+  WS_METHODS.hopliteCloudClearAgentCredential,
+  {
+    payload: HopliteCloudClearAgentCredentialInput,
+    success: HopliteCloudStatus,
+    error: HopliteCloudRpcError,
+  },
+);
 
 const WsHopliteCloudWatchTaskChatRpc = Rpc.make(WS_METHODS.hopliteCloudWatchTaskChat, {
   payload: HopliteCloudWatchTaskChatInput,
@@ -2519,6 +2538,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsHopliteCloudGetStatusRpc,
   WsHopliteCloudConnectRpc,
   WsHopliteCloudDisconnectRpc,
+  WsHopliteCloudSetAgentCredentialRpc,
+  WsHopliteCloudClearAgentCredentialRpc,
   WsHopliteCloudWatchTaskChatRpc,
   WsHopliteCloudSendTaskMessageRpc,
   WsHopliteCloudStopTaskRpc,

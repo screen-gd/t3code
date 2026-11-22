@@ -3389,12 +3389,10 @@
   ],
   "1b1131295f62c44c": "제공자 프로세스가 종료되었습니다. 응답하려면 하위 스레드를 중단하거나 다시 시작하세요.",
   "aa0cafb15a8af211": "No messages yet.",
-  "1fac6f2852ba5ea3": "Running in Hoplite",
   "71e33a5735e26bab": "Close task chat",
   "c9c1dcf39bb0ca83": "Message the task",
   "1109005024924323": "Stop task",
   "bb081b4501ebd5a7": "Send",
-  "0b9c45ff88a88b50": "Loading chat from Hoplite",
   "da66023072c473d1": [
     "출력을 불러올 수 없습니다: ",
     {
@@ -12431,5 +12429,17 @@
   "605b397e8bf2110e": "Cloud sandboxes",
   "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
   "3d7cdab1909733c0": "Manage",
-  "6c1a8596ccf4ed87": "베타 시스템 트레이 백그라운드 창 닫기 최소화 숨기기 서버 에이전트 원격"
+  "6c1a8596ccf4ed87": "베타 시스템 트레이 백그라운드 창 닫기 최소화 숨기기 서버 에이전트 원격",
+  "5ede297894b5d038": "{provider}에서 채팅을 불러오는 중",
+  "152004ea16e146b3": "{provider}에서 실행 중",
+  "9b4777ff3bb343e5": "저장된 API 키",
+  "c1bdec0172319544": "저장된 구독 토큰",
+  "597f5afa4d3b6093": "이 머신의 환경에서",
+  "ddfa18d485474c30": "자격 증명을 저장할 수 없습니다.",
+  "eb474d5fb2aa3085": "샌드박스용 Claude",
+  "1deb32271be14520": "Anthropic API 키를 붙여넣거나 `claude setup-token`을 실행한 뒤 그 토큰을 붙여넣어 Claude 플랜을 사용하세요.",
+  "e033591b273697aa": "API 키 또는 setup-token",
+  "0a8bf9e56819c4f4": "샌드박스용 Codex",
+  "a22795377698ca95": "OpenAI API 키를 붙여넣으세요.",
+  "a251b7e1a2f3a189": "OpenAI API 키"
 }

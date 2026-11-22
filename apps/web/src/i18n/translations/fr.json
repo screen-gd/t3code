@@ -3393,12 +3393,10 @@
   ],
   "1b1131295f62c44c": "Le processus du fournisseur n’existe plus. Interrompez ou redémarrez le fil enfant pour répondre.",
   "aa0cafb15a8af211": "No messages yet.",
-  "1fac6f2852ba5ea3": "Running in Hoplite",
   "71e33a5735e26bab": "Close task chat",
   "c9c1dcf39bb0ca83": "Message the task",
   "1109005024924323": "Stop task",
   "bb081b4501ebd5a7": "Send",
-  "0b9c45ff88a88b50": "Loading chat from Hoplite",
   "da66023072c473d1": [
     "Impossible de charger la sortie : ",
     {
@@ -12487,5 +12485,17 @@
   "605b397e8bf2110e": "Cloud sandboxes",
   "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
   "3d7cdab1909733c0": "Manage",
-  "6c1a8596ccf4ed87": "bêta barre d’état système arrière-plan fermer fenêtre réduire masquer serveur agents distant"
+  "6c1a8596ccf4ed87": "bêta barre d’état système arrière-plan fermer fenêtre réduire masquer serveur agents distant",
+  "5ede297894b5d038": "Chargement du chat depuis {provider}",
+  "152004ea16e146b3": "Exécution dans {provider}",
+  "9b4777ff3bb343e5": "Clé API enregistrée",
+  "c1bdec0172319544": "Jeton d'abonnement enregistré",
+  "597f5afa4d3b6093": "Depuis l'environnement de cette machine",
+  "ddfa18d485474c30": "L'identifiant n'a pas pu être enregistré.",
+  "eb474d5fb2aa3085": "Claude pour les sandboxes",
+  "1deb32271be14520": "Collez une clé API Anthropic, ou exécutez `claude setup-token` et collez son jeton pour utiliser un forfait Claude.",
+  "e033591b273697aa": "Clé API ou setup-token",
+  "0a8bf9e56819c4f4": "Codex pour les sandboxes",
+  "a22795377698ca95": "Collez une clé API OpenAI.",
+  "a251b7e1a2f3a189": "Clé API OpenAI"
 }

@@ -3393,12 +3393,10 @@
   ],
   "1b1131295f62c44c": "El proceso del proveedor ya no existe. Interrumpe o reinicia el hilo secundario para responder.",
   "aa0cafb15a8af211": "No messages yet.",
-  "1fac6f2852ba5ea3": "Running in Hoplite",
   "71e33a5735e26bab": "Close task chat",
   "c9c1dcf39bb0ca83": "Message the task",
   "1109005024924323": "Stop task",
   "bb081b4501ebd5a7": "Send",
-  "0b9c45ff88a88b50": "Loading chat from Hoplite",
   "da66023072c473d1": [
     "No se pudo cargar la salida: ",
     {
@@ -12482,5 +12480,17 @@
   "605b397e8bf2110e": "Cloud sandboxes",
   "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
   "3d7cdab1909733c0": "Manage",
-  "6c1a8596ccf4ed87": "beta bandeja del sistema segundo plano cerrar ventana minimizar ocultar servidor agentes remoto"
+  "6c1a8596ccf4ed87": "beta bandeja del sistema segundo plano cerrar ventana minimizar ocultar servidor agentes remoto",
+  "5ede297894b5d038": "Cargando chat desde {provider}",
+  "152004ea16e146b3": "Ejecutándose en {provider}",
+  "9b4777ff3bb343e5": "Clave de API guardada",
+  "c1bdec0172319544": "Token de suscripción guardado",
+  "597f5afa4d3b6093": "Del entorno de esta máquina",
+  "ddfa18d485474c30": "No se pudo guardar la credencial.",
+  "eb474d5fb2aa3085": "Claude para sandboxes",
+  "1deb32271be14520": "Pega una clave de API de Anthropic, o ejecuta `claude setup-token` y pega su token para usar un plan de Claude.",
+  "e033591b273697aa": "Clave de API o setup-token",
+  "0a8bf9e56819c4f4": "Codex para sandboxes",
+  "a22795377698ca95": "Pega una clave de API de OpenAI.",
+  "a251b7e1a2f3a189": "Clave de API de OpenAI"
 }

@@ -3393,12 +3393,10 @@
   ],
   "1b1131295f62c44c": "Leverantörsprocessen finns inte längre. Avbryt eller starta om undertråden för att svara.",
   "aa0cafb15a8af211": "No messages yet.",
-  "1fac6f2852ba5ea3": "Running in Hoplite",
   "71e33a5735e26bab": "Close task chat",
   "c9c1dcf39bb0ca83": "Message the task",
   "1109005024924323": "Stop task",
   "bb081b4501ebd5a7": "Send",
-  "0b9c45ff88a88b50": "Loading chat from Hoplite",
   "da66023072c473d1": [
     "Kunde inte läsa in utdata: ",
     {
@@ -12494,5 +12492,17 @@
   "605b397e8bf2110e": "Cloud sandboxes",
   "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
   "3d7cdab1909733c0": "Manage",
-  "6c1a8596ccf4ed87": "beta systemfält bakgrund stäng fönster minimera dölj server agenter fjärr"
+  "6c1a8596ccf4ed87": "beta systemfält bakgrund stäng fönster minimera dölj server agenter fjärr",
+  "5ede297894b5d038": "Laddar chatt från {provider}",
+  "152004ea16e146b3": "Körs i {provider}",
+  "9b4777ff3bb343e5": "Sparad API-nyckel",
+  "c1bdec0172319544": "Sparat prenumerationstoken",
+  "597f5afa4d3b6093": "Från den här datorns miljö",
+  "ddfa18d485474c30": "Autentiseringsuppgifterna kunde inte sparas.",
+  "eb474d5fb2aa3085": "Claude för sandlådor",
+  "1deb32271be14520": "Klistra in en Anthropic API-nyckel, eller kör `claude setup-token` och klistra in dess token för att använda en Claude-plan.",
+  "e033591b273697aa": "API-nyckel eller setup-token",
+  "0a8bf9e56819c4f4": "Codex för sandlådor",
+  "a22795377698ca95": "Klistra in en OpenAI API-nyckel.",
+  "a251b7e1a2f3a189": "OpenAI API-nyckel"
 }

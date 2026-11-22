@@ -301,21 +301,35 @@ account there.
 
 - **Hoplite** runs its own cloud agent, on a model you pick.
 - **E2B, Daytona and Agent37** start a new sandbox per task, clone the
-  repository into it, and run Claude Code there. Set `ANTHROPIC_API_KEY` where
-  T3 Code runs, and `GH_TOKEN` or `GITHUB_TOKEN` for private repositories and
-  pull requests. Those two go into the sandbox as the agent's environment, so
-  the agent and anything it runs can read them. T3 Code replaces them, and the
-  provider key, with `[redacted]` in the replies it shows. The sandbox stays
-  until the provider stops it for idling or an agent deletes it.
+  repository into it, and run the chosen `agent` there: `claude` (the
+  default) or `codex`. Claude signs in with the credential under **Claude
+  for sandboxes**: paste an Anthropic API key, or a token from `claude
+  setup-token` to run on a Claude Pro or Max subscription. Without one
+  saved, `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, where T3 Code
+  runs are used. Codex signs in with an OpenAI API key under **Codex for
+  sandboxes**, or `CODEX_API_KEY`, then `OPENAI_API_KEY`, where T3 Code
+  runs; a ChatGPT plan login is not supported, only an API key. `GH_TOKEN`
+  or `GITHUB_TOKEN` covers private repositories and pull requests. The
+  agent's credential and the GitHub token go into the sandbox as the
+  agent's environment, so the agent and anything it runs can read them.
+  T3 Code replaces them, and the provider key, with `[redacted]` in the
+  replies it shows.
+- The task can name a `model`, a Claude Code model such as `sonnet` or
+  `opus`, or a Codex model such as `gpt-5-codex`, and a `template`, the
+  image or snapshot the sandbox is created from. Messages sent while it
+  works wait in its queue rather than failing, and follow-ups resume the
+  same Claude or Codex session. E2B sandboxes pause on idle instead of
+  being deleted. A task's `cloud_preview` link opens the app it serves;
+  `start` applies to Hoplite only. The sandbox stays until the provider
+  stops it for idling or an agent deletes it.
 
 Agents can also create an empty E2B, Daytona or Agent37 sandbox and run
 commands in it themselves. Only the provider key is used for that.
 
-Click a Hoplite task in the chat or the thread's details to open its chat in
-the side panel, with the agent's live progress. Messages you send there go to
-the task, and the thread's agent hears back when that run finishes, as with its
-own follow-ups. E2B, Daytona and Agent37 tasks have no side-panel chat yet; the
-thread's agent follows up on them itself.
+Click a task in the chat or the thread's details to open its chat in the side
+panel, with the agent's progress. Messages you send there go to the task, and
+the thread's agent hears back when that run finishes, as with its own
+follow-ups.
 
 ## Browser on a remote environment
 

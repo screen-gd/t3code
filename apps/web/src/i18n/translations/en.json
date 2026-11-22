@@ -3393,12 +3393,10 @@
   ],
   "1b1131295f62c44c": "Provider process is gone. Interrupt or restart the child thread to respond.",
   "aa0cafb15a8af211": "No messages yet.",
-  "1fac6f2852ba5ea3": "Running in Hoplite",
   "71e33a5735e26bab": "Close task chat",
   "c9c1dcf39bb0ca83": "Message the task",
   "1109005024924323": "Stop task",
   "bb081b4501ebd5a7": "Send",
-  "0b9c45ff88a88b50": "Loading chat from Hoplite",
   "da66023072c473d1": [
     "Couldn't load output: ",
     {
@@ -12496,5 +12494,17 @@
   "605b397e8bf2110e": "Cloud sandboxes",
   "bc918d443e436068": "Connecting a cloud sandbox needs settings access on this machine.",
   "3d7cdab1909733c0": "Manage",
-  "6c1a8596ccf4ed87": "beta system tray background close window minimize hide server agents remote"
+  "6c1a8596ccf4ed87": "beta system tray background close window minimize hide server agents remote",
+  "5ede297894b5d038": "Loading chat from {provider}",
+  "152004ea16e146b3": "Running in {provider}",
+  "9b4777ff3bb343e5": "Saved API key",
+  "c1bdec0172319544": "Saved subscription token",
+  "597f5afa4d3b6093": "From this machine's environment",
+  "ddfa18d485474c30": "The credential could not be saved.",
+  "eb474d5fb2aa3085": "Claude for sandboxes",
+  "1deb32271be14520": "Paste an Anthropic API key, or run `claude setup-token` and paste its token to use a Claude plan.",
+  "e033591b273697aa": "API key or setup-token",
+  "0a8bf9e56819c4f4": "Codex for sandboxes",
+  "a22795377698ca95": "Paste an OpenAI API key.",
+  "a251b7e1a2f3a189": "OpenAI API key"
 }

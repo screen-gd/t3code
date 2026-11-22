@@ -12,6 +12,7 @@ export default function CloudTaskChatEntries(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly taskId: NodeId;
+  readonly provider: string;
 }) {
   const chat = useEnvironmentQuery(
     hopliteCloudEnvironment.taskChat({
@@ -23,7 +24,7 @@ export default function CloudTaskChatEntries(props: {
     return <p className="text-sm text-destructive">{chat.error}</p>;
   }
   if (chat.data === null || (!chat.data.live && chat.data.entries.length === 0)) {
-    return <CloudTaskChatLoading />;
+    return <CloudTaskChatLoading provider={props.provider} />;
   }
   if (chat.data.entries.length === 0) {
     return (

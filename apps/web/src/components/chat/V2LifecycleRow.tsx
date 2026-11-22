@@ -474,7 +474,7 @@ function SubagentTimelineLink(props: {
   const gt = useGT();
   const m = useMessages();
   const threadId = props.threadId;
-  const showsChat = remote?.service === "hoplite";
+  const showsChat = remote?.service !== undefined;
   // A task in a linked environment opens there, or read-only through this one.
   const remoteOpener = useLinkedThreadOpener(
     props.parentRef,
