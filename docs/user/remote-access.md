@@ -316,10 +316,12 @@ account there.
   replies it shows.
 - The task can name a `model`, a Claude Code model such as `sonnet` or
   `opus`, or a Codex model such as `gpt-5-codex`, and a `template`, the
-  image or snapshot the sandbox is created from. Messages sent while it
+  image or snapshot the sandbox is created from. Sandbox task images must
+  include `flock` (from util-linux). Messages sent while it
   works wait in its queue rather than failing, and follow-ups resume the
   same Claude or Codex session. E2B sandboxes pause on idle instead of
-  being deleted. A task's `cloud_preview` link opens the app it serves;
+  being deleted. Hoplite, E2B and Daytona support `cloud_preview` links to
+  the app a task serves; Agent37 does not support previews.
   `start` applies to Hoplite only. The sandbox stays until the provider
   stops it for idling or an agent deletes it.
 
@@ -515,8 +517,10 @@ an address you trust: the code is sent there.
   machine's own threads, projects or settings, and they skip its project setup
   scripts.
 - The link shows up in that machine's **Settings → Sharing & access** like any
-  outside agent. Revoke it there to end it. **Forget** on this machine only
-  removes it here.
+  outside agent, and can be revoked there. **Forget** on this machine also ends
+  it there when that machine confirms it. If it can't, such as when it is
+  offline or on an older T3 Code, Forget says so; revoke it in that machine's
+  Sharing & access.
 - A link stays valid while agents use it. One unused for 30 days expires, as
   does one to a machine on an older T3 Code after 30 days; link again with a
   new pairing code.

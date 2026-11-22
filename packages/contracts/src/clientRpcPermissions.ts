@@ -99,6 +99,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.hopliteCloudDisconnect]: AuthSettingsWriteScope,
   [WS_METHODS.hopliteCloudSetAgentCredential]: AuthSettingsWriteScope,
   [WS_METHODS.hopliteCloudClearAgentCredential]: AuthSettingsWriteScope,
+  // Send stores and sends a report from a thread's turn: the bar of running that thread.
+  [WS_METHODS.agentFeedbackAnswerRequest]: AuthOrchestrationOperateScope,
 } as const;
 export type ClientGuardedRpcTag = keyof typeof CLIENT_GUARDED_RPC_SCOPES;
 
