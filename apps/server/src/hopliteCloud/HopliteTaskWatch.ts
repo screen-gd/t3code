@@ -348,6 +348,22 @@ const make = Effect.gen(function* () {
       ),
     );
 
+  const addOrClose = Effect.fn("HopliteTaskWatch.addOrClose")(function* (
+    watch: HopliteTaskWatchEntry,
+  ) {
+    const admitted = yield* add(watch);
+    if (!admitted && watch.taskId !== undefined) {
+      yield* completeCard(
+        watch.callerThreadId,
+        watch.taskId,
+        "failed",
+        "This run is not being watched because the 50-task watch limit was reached. The cloud task continues; check its status manually.",
+        "ran-out",
+      );
+    }
+    return admitted;
+  });
+
   const startTask = Effect.fn("HopliteTaskWatch.startTask")(function* (
     input: HopliteCloudStartTaskInput,
     callerThreadId: string | undefined,
@@ -362,7 +378,7 @@ const make = Effect.gen(function* () {
       title: input.title ?? started.task.title ?? undefined,
       key: started.runId ?? "start",
     });
-    const watched = yield* add({
+    const watched = yield* addOrClose({
       callerThreadId,
       hopliteThreadId: started.task.threadId,
       runId: started.runId,
@@ -393,7 +409,7 @@ const make = Effect.gen(function* () {
       title: before.task.title ?? undefined,
       key: runId ?? input.clientRequestId ?? (yield* random.uuidV4()),
     });
-    const watched = yield* add({
+    const watched = yield* addOrClose({
       callerThreadId,
       hopliteThreadId: input.threadId,
       runId,
@@ -426,7 +442,7 @@ const make = Effect.gen(function* () {
       title: before.task.title ?? undefined,
       key: `answer:${input.questionId}`,
     });
-    const watched = yield* add({
+    const watched = yield* addOrClose({
       callerThreadId,
       hopliteThreadId: input.threadId,
       runId,

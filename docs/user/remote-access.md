@@ -316,10 +316,12 @@ account there.
   replies it shows.
 - The task can name a `model`, a Claude Code model such as `sonnet` or
   `opus`, or a Codex model such as `gpt-5-codex`, and a `template`, the
-  image or snapshot the sandbox is created from. Messages sent while it
+  image or snapshot the sandbox is created from. Sandbox task images must
+  include `flock` (from util-linux). Messages sent while it
   works wait in its queue rather than failing, and follow-ups resume the
   same Claude or Codex session. E2B sandboxes pause on idle instead of
-  being deleted. A task's `cloud_preview` link opens the app it serves;
+  being deleted. Hoplite, E2B and Daytona support `cloud_preview` links to
+  the app a task serves; Agent37 does not support previews.
   `start` applies to Hoplite only. The sandbox stays until the provider
   stops it for idling or an agent deletes it.
 

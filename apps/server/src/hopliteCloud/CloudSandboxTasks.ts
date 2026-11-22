@@ -14,20 +14,14 @@ const ERR_MARKER = "---t3-task-err---";
 // Older sandboxes keep their last turn directly in STATE_DIR.
 const CURRENT_STATE = `turn=$(cat "${STATE_DIR}/turn" 2>/dev/null || true); state="${STATE_DIR}/runs/$turn"; [ -d "$state" ] || state="${STATE_DIR}"`;
 
-/**
- * A real lock on every image: flock where it exists, a mkdir lock that sweeps a
- * dead owner where it does not. Always the first call in a `( )` or `$( )` subshell,
- * so the lock frees when the subshell exits.
- */
+// An advisory kernel lock releases even if acquisition or its holder is killed.
 const T3_LOCK = `t3_lock() {
-  if command -v flock >/dev/null 2>&1; then exec 9>"$STATE_DIR/lock"; flock 9; return; fi
-  while ! mkdir "$STATE_DIR/lock.d" 2>/dev/null; do
-    owner=$(cat "$STATE_DIR/lock.d/pid" 2>/dev/null || true)
-    if [ -n "$owner" ] && ! kill -0 "$owner" 2>/dev/null; then rm -rf "$STATE_DIR/lock.d"; continue; fi
-    sleep 0.1
-  done
-  echo "$BASHPID" > "$STATE_DIR/lock.d/pid"
-  trap 'rm -rf "$STATE_DIR/lock.d"' EXIT
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "flock is required to run sandbox tasks; use an image with util-linux installed." >&2
+    exit 1
+  fi
+  exec 9>"$STATE_DIR/lock" || exit 1
+  flock 9 || exit 1
 }`;
 
 /**
@@ -207,7 +201,8 @@ export const readTurnScript = (input?: { readonly turn: number } | { readonly qu
             "find_item",
             // The runner writes `item` before it moves the prompt out of the queue, so a
             // second look after the prompt left finds the turn it became.
-            `if [ -z "$state" ] && [ ! -f "${STATE_DIR}/queue/$item.prompt" ]; then find_item; fi`,
+            `if [ -f "${STATE_DIR}/queue/$item.prompt" ]; then prompt_seen=yes; else prompt_seen=no; fi`,
+            'if [ -z "$state" ] && [ "$prompt_seen" = no ]; then find_item; fi',
             'if [ -n "$state" ]; then turn=$(basename "$state"); else turn=""; fi',
           ]),
     'echo "turn=$turn"',
@@ -216,7 +211,7 @@ export const readTurnScript = (input?: { readonly turn: number } | { readonly qu
     ...(input !== undefined && "queued" in input
       ? [
           'if [ -z "$state" ]; then',
-          `  if [ -f "${STATE_DIR}/queue/$item.prompt" ]; then echo "pending=1"; else echo "dropped=1"; fi`,
+          '  if [ "$prompt_seen" = yes ]; then echo "pending=1"; else echo "dropped=1"; fi',
           "fi",
         ]
       : []),
@@ -488,7 +483,7 @@ export const parseChat = (output: string): Array<CloudTaskChatEntry> => {
               if (!done) pending.add(entries.length);
               entries.push({
                 _tag: "tool",
-                id: item.id,
+                id: `turn-${turn.turn}-${item.id}`,
                 title: codexToolTitle(item),
                 status,
               });

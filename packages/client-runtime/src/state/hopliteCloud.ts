@@ -1,4 +1,9 @@
-import { type CloudTaskChatEntry, type CloudTaskChatEvent, WS_METHODS } from "@t3tools/contracts";
+import {
+  type CloudTaskChatEntry,
+  type CloudTaskChatEvent,
+  type CloudSandboxAgent,
+  WS_METHODS,
+} from "@t3tools/contracts";
 import * as Stream from "effect/Stream";
 import { Atom } from "effect/reactivity";
 
@@ -55,6 +60,16 @@ export function createHopliteCloudEnvironmentAtoms<R, E>(
     mode: "singleFlight",
     key: ({ environmentId }: { readonly environmentId: string }) => environmentId,
   } as const;
+  const agentCredentialWrite = {
+    mode: "singleFlight",
+    key: ({
+      environmentId,
+      input,
+    }: {
+      readonly environmentId: string;
+      readonly input: { readonly agent?: CloudSandboxAgent };
+    }) => `${environmentId}:${input.agent ?? "claude"}`,
+  } as const;
   return {
     status: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:hoplite-cloud:status",
@@ -73,12 +88,12 @@ export function createHopliteCloudEnvironmentAtoms<R, E>(
     setAgentCredential: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:hoplite-cloud:set-agent-credential",
       tag: WS_METHODS.hopliteCloudSetAgentCredential,
-      concurrency: settingsWrite,
+      concurrency: agentCredentialWrite,
     }),
     clearAgentCredential: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:hoplite-cloud:clear-agent-credential",
       tag: WS_METHODS.hopliteCloudClearAgentCredential,
-      concurrency: settingsWrite,
+      concurrency: agentCredentialWrite,
     }),
     sendTaskMessage: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:hoplite-cloud:send-task-message",

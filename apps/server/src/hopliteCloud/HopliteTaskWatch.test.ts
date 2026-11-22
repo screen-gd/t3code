@@ -396,3 +396,31 @@ it.effect("a watch survives a server restart", () => {
     );
   });
 });
+
+it.effect(
+  "a full watch list closes an unwatched follow-up card without evicting its first run",
+  () => {
+    const harness = makeHarness();
+    harness.state.runs = [activeRun];
+    harness.state.cardIds = Array.from({ length: 51 }, (_, i) => `node:card${i}`);
+    harness.state.sendRunIds = Array.from({ length: 51 }, (_, i) => `run_${i}`);
+    return Effect.gen(function* () {
+      const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+      for (let i = 0; i < 50; i++) {
+        yield* watch.sendMessage({ threadId: `thr_${i}`, message: "Work" }, "t3-thread");
+      }
+      const overflow = yield* watch.sendMessage(
+        { threadId: "thr_0", message: "Follow up" },
+        "t3-thread",
+      );
+      assert.isUndefined(overflow.next);
+      const completed = harness.dispatched.filter(
+        (command) => command.type === "delegated_task.remote.complete",
+      );
+      assert.equal(completed.length, 1);
+      assert.equal(completed[0]?.taskId, NodeId.make("node:card50"));
+      assert.include(completed[0]?.result, "not being watched");
+      assert.isTrue(yield* watch.watching("thr_0"));
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
