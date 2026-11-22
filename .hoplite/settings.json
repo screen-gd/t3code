@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "run": {
+      "command": "export PATH=\"$PWD/node_modules/.bin:$PATH\"; vp run dev"
+    }
+  },
+  "ports": {
+    "preview": 5733
+  }
+}
