@@ -4189,6 +4189,7 @@ export default function ChatView(props: ChatViewProps) {
               </div>
             ) : null
           }
+          parentRef={activeThreadRef}
           surfaces={renderedRightPanelSurfaces}
           environmentId={activeThreadRef.environmentId}
           activeSurfaceId={renderedRightPanelSurface?.id ?? null}
