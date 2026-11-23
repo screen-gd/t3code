@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import { msg, T, useGT, useMessages } from "gt-react";
 import { m, type MessageResolver } from "../i18n/messages";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
@@ -24,6 +25,8 @@ import type {
   ProjectId,
   PullRequestState,
   ResolvedKeybindingsConfig,
+  ScopedThreadRef,
+  NodeId,
   ThreadId,
 } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabelsCopy";
@@ -68,6 +71,7 @@ import {
 } from "react";
 
 import { isElectron } from "~/env";
+import { environmentThreadDetails } from "~/state/threads";
 import type { DesktopPreviewOverlay } from "~/previewStateStore";
 import { linkedThreadTitle } from "~/linkedThreadSurface";
 import type { RightPanelSurface } from "~/rightPanelStore";
@@ -129,6 +133,7 @@ export interface RightPanelTabsProps {
   layoutControls?: ReactNode;
   surfaces: readonly RightPanelSurface[];
   environmentId: EnvironmentId | null;
+  parentRef?: ScopedThreadRef | undefined;
   activeSurfaceId: string | null;
   pendingSurfaceIds: ReadonlySet<string>;
   previewSessions: Readonly<Record<string, PreviewSessionSnapshot>>;
@@ -685,12 +690,14 @@ function SurfaceIcon({
   theme,
   environmentId,
   pullRequestStatusSeed,
+  parentRef,
 }: {
   surface: RightPanelSurface;
   previewUrl: string | null;
   previewCapturedUrl: string | null;
   theme: "light" | "dark";
   environmentId: EnvironmentId | null;
+  parentRef: ScopedThreadRef | undefined;
   pullRequestStatusSeed: PullRequestTabStatusSeed | undefined;
 }) {
   switch (surface.kind) {
@@ -728,11 +735,10 @@ function SurfaceIcon({
     case "linked-thread":
       return <MessagesSquare className="size-3 shrink-0" />;
     case "cloud-task":
-      return (
-        <CloudSandboxProviderMark
-          provider={cloudSandboxProviderInfo("hoplite")}
-          className="size-3 shrink-0"
-        />
+      return parentRef ? (
+        <CloudTaskTabIcon parentRef={parentRef} taskId={surface.taskId} />
+      ) : (
+        <MessagesSquare className="size-3 shrink-0" />
       );
     case "device":
       return surface.target?.platform === "ios" ? (
@@ -743,6 +749,23 @@ function SurfaceIcon({
         <Smartphone className="size-3 shrink-0" />
       );
   }
+}
+
+/** Reads the provider from the parent so restored cloud tabs use the current task metadata. */
+function CloudTaskTabIcon(props: { parentRef: ScopedThreadRef; taskId: NodeId }) {
+  const service = useAtomValue(
+    environmentThreadDetails.threadAtom(props.parentRef),
+    (thread) =>
+      thread?.projection.subagents.find((agent) => agent.id === props.taskId)?.remoteChild?.service,
+  );
+  return service ? (
+    <CloudSandboxProviderMark
+      provider={cloudSandboxProviderInfo(service)}
+      className="size-3 shrink-0"
+    />
+  ) : (
+    <MessagesSquare className="size-3 shrink-0" />
+  );
 }
 
 const SIDE_CHAT_STATE_LABELS = {
@@ -965,6 +988,7 @@ function RightPanelTab(
     previewCapturedUrl: string | null;
     theme: "light" | "dark";
     environmentId: EnvironmentId | null;
+    parentRef: ScopedThreadRef | undefined;
     pullRequestStatusSeed: PullRequestTabStatusSeed | undefined;
     renaming: boolean;
     canRename: boolean;
@@ -1009,6 +1033,7 @@ function RightPanelTab(
           previewCapturedUrl={props.previewCapturedUrl}
           theme={props.theme}
           environmentId={props.environmentId}
+          parentRef={props.parentRef}
           pullRequestStatusSeed={props.pullRequestStatusSeed}
         />
         {props.pending ? (
@@ -1541,6 +1566,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     previewCapturedUrl={favicon.capturedUrl}
                     theme={resolvedTheme}
                     environmentId={props.environmentId}
+                    parentRef={props.parentRef}
                     pullRequestStatusSeed={props.pullRequestStatusSeeds?.[surface.id]}
                     renaming={renamingDevice === surface.id}
                     canRename={props.onRenameDevice !== undefined}
