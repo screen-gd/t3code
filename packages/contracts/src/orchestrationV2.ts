@@ -3946,6 +3946,14 @@ const OrchestrationV2InternalCommand = Schema.Union([
    * and without it (a Stop or cancel here) the task owes a stop there instead.
    */
   Schema.Struct({
+    type: Schema.Literal("delegated_task.remote.progress"),
+    commandId: CommandId,
+    parentThreadId: ThreadId,
+    taskId: NodeId,
+    status: Schema.Literals(["running", "waiting"]),
+    runId: Schema.optional(Schema.NullOr(RunId)),
+  }),
+  Schema.Struct({
     type: Schema.Literal("delegated_task.remote.complete"),
     commandId: CommandId,
     parentThreadId: ThreadId,

@@ -146,14 +146,16 @@ export const HopliteCloudAnswerInput = Schema.Struct({
   threadId: HopliteId,
   questionId: HopliteId,
   answer: TrimmedNonEmptyString.check(Schema.isMaxLength(10_000)),
+  dismiss: Schema.optional(Schema.Boolean),
   /** Makes retries send one answer. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
 export type HopliteCloudAnswerInput = typeof HopliteCloudAnswerInput.Type;
 
-/** A question a Hoplite agent stopped to ask; one answer covers all its parts. */
+/** A cloud delegate's question; its task and question ids route the answer. */
 export const HopliteCloudQuestion = Schema.Struct({
   questionId: HopliteId,
+  runId: Schema.optional(Schema.String),
   parts: Schema.Array(
     Schema.Struct({
       question: Schema.String,

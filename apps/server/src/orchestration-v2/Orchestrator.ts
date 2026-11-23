@@ -705,6 +705,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "delegated_task.request":
     case "delegated_task.remote.request":
     case "delegated_task.remote.complete":
+    case "delegated_task.remote.progress":
     case "delegated_task.remote.stop":
     case "delegated_task.wake-policy":
     case "delegated_task.completion-delivery.acknowledge":
@@ -10568,12 +10569,73 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     });
   });
 
-  /**
-   * Completes a task that ran in a linked environment: the parent half of
-   * `finalizeAppOwnedSubagent`, with the result its thread there ended with.
-   * It runs under the parent's lock, so it never interleaves with a wake
-   * policy change or a delivery on the same task.
-   */
+  const dispatchRemoteDelegatedTaskProgress = Effect.fn(
+    "orchestrationV2.dispatch.remoteDelegatedTaskProgress",
+  )(function* (
+    command: Extract<
+      OrchestrationV2InternalCommand,
+      { readonly type: "delegated_task.remote.progress" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(command.parentThreadId, ["subagents", "nodes", "turnItems"], {
+        nodeIds: [command.taskId],
+        turnItemNodeIds: [command.taskId],
+        turnItemTypes: ["subagent"],
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.parentThreadId, cause }),
+        ),
+      );
+    const task = projection.subagents.find(
+      (task) =>
+        task.id === command.taskId && task.origin === "app_owned" && task.remoteChild !== undefined,
+    );
+    if (
+      task === undefined ||
+      task.result !== null ||
+      !["pending", "running", "waiting"].includes(task.status)
+    )
+      return;
+    const now = yield* DateTime.now;
+    const { runId: previousRunId, ...remote } = task.remoteChild!;
+    const runId = command.runId === undefined ? previousRunId : command.runId;
+    const remoteChild = { ...remote, ...(runId == null ? {} : { runId }) };
+    const base = {
+      threadId: command.parentThreadId,
+      ...(task.runId === null ? {} : { runId: task.runId }),
+      nodeId: task.id,
+      occurredAt: now,
+    };
+    yield* emit(
+      events,
+      command,
+    )({
+      ...base,
+      type: "subagent.updated",
+      payload: { ...task, status: command.status, remoteChild, updatedAt: now },
+    });
+    for (const node of projection.nodes.filter((node) => node.id === task.id)) {
+      yield* emit(
+        events,
+        command,
+      )({ ...base, type: "node.updated", payload: { ...node, status: command.status } });
+    }
+    for (const item of projection.turnItems) {
+      if (item.nodeId !== task.id || item.type !== "subagent") continue;
+      yield* emit(
+        events,
+        command,
+      )({
+        ...base,
+        type: "turn-item.updated",
+        payload: { ...item, status: command.status, remoteChild, updatedAt: now },
+      });
+    }
+  });
+
   const dispatchRemoteDelegatedTaskComplete = Effect.fn(
     "orchestrationV2.dispatch.remoteDelegatedTaskComplete",
   )(function* (
@@ -16262,6 +16324,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "delegated_task.remote.complete":
         yield* dispatchRemoteDelegatedTaskComplete(command, events);
+        break;
+      case "delegated_task.remote.progress":
+        yield* dispatchRemoteDelegatedTaskProgress(command, events);
         break;
       case "delegated_task.remote.stop":
         yield* dispatchRemoteDelegatedTaskStop(command, events);

@@ -146,7 +146,13 @@ const makeHarness = () => {
         ],
       });
     }
-    if (request.method === "POST" && url.pathname === "/api/threads/thr_1/questions/q_1") {
+    if (
+      request.method === "POST" &&
+      [
+        "/api/threads/thr_1/questions/q_1",
+        "/api/threads/thr_1/questions/appr_toolu_exampleABC",
+      ].includes(url.pathname)
+    ) {
       return respond(202, { ok: true, result: { threadId: "thr_1", runId: "run_1" } });
     }
     if (url.pathname === "/api/threads/thr_1") return respond(200, { ok: true, thread });
@@ -375,6 +381,7 @@ it.effect("a task reports its questions and takes an answer", () => {
     assert.deepStrictEqual(questions, [
       {
         questionId: "q_1",
+        runId: "run_1",
         parts: [
           {
             question: "Keep the old session cookie?",
@@ -397,6 +404,25 @@ it.effect("a task reports its questions and takes an answer", () => {
     const answer = harness.sent.find((request) => request.path.endsWith("/questions/q_1"));
     assert.deepStrictEqual(answer?.body, { answer: "Yes" });
     assert.equal(answer?.headers["idempotency-key"], "t3code:req-3");
+    yield* hoplite.answerQuestion({
+      threadId: "thr_1",
+      questionId: "q_1",
+      answer: "Dismiss",
+      dismiss: true,
+    });
+    const dismissed = harness.sent
+      .filter((request) => request.path.endsWith("/questions/q_1"))
+      .at(-1);
+    assert.deepStrictEqual(dismissed?.body, { answers: null });
+    assert.equal(dismissed?.headers["idempotency-key"], "t3code:answer:q_1");
+    assert.deepStrictEqual(
+      yield* hoplite.answerQuestion({
+        threadId: "thr_1",
+        questionId: "appr_toolu_exampleABC",
+        answer: "Yes",
+      }),
+      { runId: "run_1" },
+    );
   }).pipe(Effect.provide(harness.layer));
 });
 
