@@ -715,15 +715,18 @@ it.effect("a retried task or follow-up with the same clientRequestId runs once",
     const start = {
       provider: "daytona",
       prompt: "Fix",
+      title: "Key test",
       repo: "acme/web",
       clientRequestId: "req-1",
     } as const;
     const first = yield* cloud.startTask(start);
+    assert.equal((yield* cloud.getTask({ threadId: first.task.threadId })).title, "Key test");
     assert.deepStrictEqual(yield* cloud.startTask(start), first);
     const followUp = { threadId: "daytona:dsb-1", message: "More", clientRequestId: "req-2" };
     const sent = yield* cloud.sendMessage(followUp);
     assert.deepStrictEqual(sent, { runId: "turn-2" });
     assert.deepStrictEqual(yield* cloud.sendMessage(followUp), sent);
+    assert.equal((yield* cloud.getTask({ threadId: first.task.threadId })).title, "Key test");
     yield* cloud.startTask({ ...start, prompt: "Another task" });
     const created = harness.sent.filter(
       (request) => request.method === "POST" && request.url.endsWith("/api/sandbox"),
@@ -735,6 +738,33 @@ it.effect("a retried task or follow-up with the same clientRequestId runs once",
     assert.lengthOf(turns, 3);
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect.each(["e2b", "daytona"] as const)(
+  "%s preserves a legacy task title across follow-ups and server restarts",
+  (provider) => {
+    const harness = makeHarness(agentEnvironment);
+    const threadId = provider === "e2b" ? "e2b:isb1" : "daytona:dsb-1";
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const cloud = yield* HopliteCloud.HopliteCloud;
+        yield* cloud.connect(provider, KEYS[provider]);
+        assert.equal(
+          (yield* cloud.readTask({ threadId, title: "Key test" })).task.title,
+          "Key test",
+        );
+      }).pipe(Effect.provide(harness.layer));
+      yield* Effect.gen(function* () {
+        const cloud = yield* HopliteCloud.HopliteCloud;
+        yield* cloud.sendMessage({ threadId, message: "Continue" });
+        assert.equal((yield* cloud.getTask({ threadId })).title, "Key test");
+        assert.equal(
+          (yield* cloud.readTask({ threadId, title: "Replacement" })).task.title,
+          "Key test",
+        );
+      }).pipe(Effect.provide(harness.layer));
+    });
+  },
+);
 
 it.effect("reports E2B's RPC error instead of an empty result", () => {
   const harness = makeHarness(agentEnvironment, { e2bError: true });

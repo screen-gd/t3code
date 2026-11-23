@@ -5,6 +5,7 @@ import type { CloudTaskChatEntry, HopliteCloudThreadStatus } from "@t3tools/cont
 
 import type { AgentKeys, CommandResult } from "./CloudSandboxProviders.ts";
 import type { HopliteRunStatus } from "./HopliteCloudService.ts";
+import { questionServerSource } from "./CloudSandboxQuestions.ts";
 
 const STATE_DIR = "$HOME/.t3-task";
 const MAX_REPLY_LENGTH = 20_000;
@@ -72,11 +73,11 @@ while :; do
   if [ "$agent" = "codex" ]; then
     [ -s "$state/model" ] && args+=(-m "$(cat "$state/model")")
     [ "$turn" -gt 1 ] && args+=(resume --last)
-    npx -y @openai/codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "\${args[@]}" "$T3_TASK_PROMPT" > "$state/out.jsonl" 2> "$state/err.log"
+    npx -y @openai/codex -c 'mcp_servers.t3_questions.command="node"' -c "mcp_servers.t3_questions.args=['$STATE_DIR/questions.cjs']" -c 'mcp_servers.t3_questions.tool_timeout_sec=86400' exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check "\${args[@]}" "$T3_TASK_PROMPT" > "$state/out.jsonl" 2> "$state/err.log"
   else
     [ "$turn" -gt 1 ] && args+=(-c)
     [ -s "$state/model" ] && args+=(--model "$(cat "$state/model")")
-    npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" "\${args[@]}" --dangerously-skip-permissions --output-format stream-json --verbose > "$state/out.jsonl" 2> "$state/err.log"
+    MCP_TOOL_TIMEOUT=2147483647 npx -y @anthropic-ai/claude-code -p "$T3_TASK_PROMPT" "\${args[@]}" --mcp-config "$STATE_DIR/mcp.json" --append-system-prompt 'Use mcp__t3_questions__request_user_input for questions, including choices. The main agent relays them to the user. Wait for its answer. A question printed in chat is not completion.' --dangerously-skip-permissions --output-format stream-json --verbose > "$state/out.jsonl" 2> "$state/err.log"
   fi
   code=$?
   (
@@ -105,6 +106,10 @@ export const agentTurnScript = (input: { readonly first: boolean }) =>
         ]
       : []),
     'mkdir -p "$HOME/work"',
+    `cat > "${STATE_DIR}/questions.cjs" <<'T3_QUESTIONS'`,
+    questionServerSource,
+    "T3_QUESTIONS",
+    `node -e 'require("node:fs").writeFileSync(process.env.HOME+"/.t3-task/mcp.json",JSON.stringify({mcpServers:{t3_questions:{command:"node",args:[process.env.HOME+"/.t3-task/questions.cjs"]}}}))'`,
     // mv keeps a runner that is already inside the old file on its own copy.
     `cat > "${STATE_DIR}/runner.sh.$$" <<'T3_RUNNER'`,
     RUNNER_SCRIPT,
@@ -539,6 +544,9 @@ export interface TurnState {
  * queue item not picked up yet reports pending or dropped. `runId` keeps the id the
  * caller asked about, so a `queued-N` watch follows the item through its turn.
  */
+export const replyNeedsInput = (reply: string | null) =>
+  reply !== null && /\?(?:\s*$|\s*\n\s*(?:[-*]|[A-D1-4][.)])\s)/.test(reply);
+
 export const parseTurn = (result: CommandResult, runId?: string): TurnState => {
   const [header = "", ...rest] = result.output.split("\n---\n");
   const turn = /turn=(\d*)/.exec(header)?.[1] ?? "";
@@ -552,6 +560,7 @@ export const parseTurn = (result: CommandResult, runId?: string): TurnState => {
   const out = (markerAt === -1 ? body : body.slice(0, markerAt)).trim();
   const err = markerAt === -1 ? "" : body.slice(markerAt + ERR_MARKER.length).trim();
   let settled: string | undefined;
+  let succeeded = false;
   let lastAssistant: string | undefined;
   // Legacy out.json is one object with the final result; anything else is stream-json.
   const legacy = parseJsonLine(out);
@@ -563,7 +572,10 @@ export const parseTurn = (result: CommandResult, runId?: string): TurnState => {
       if (!line.startsWith("{")) continue;
       const event = parseJsonLine(line);
       if (!isRecord(event)) continue;
-      if (event.type === "result" && typeof event.result === "string") settled = event.result;
+      if (event.type === "result" && typeof event.result === "string") {
+        settled = event.result;
+        succeeded = event.subtype === "success" && event.is_error === false;
+      }
       if (event.type === "assistant") {
         const text = messageText(event);
         if (text !== null) lastAssistant = text;
@@ -583,6 +595,7 @@ export const parseTurn = (result: CommandResult, runId?: string): TurnState => {
     }
   }
   const reply = settled ?? lastAssistant ?? (out.length > 0 ? out : err.length > 0 ? err : null);
+  const asksForInput = replyNeedsInput(reply);
   const pullRequests = body.match(PULL_REQUEST);
   const id = runId ?? `turn-${turn === "" ? "0" : turn}`;
   const state = dropped
@@ -597,8 +610,11 @@ export const parseTurn = (result: CommandResult, runId?: string): TurnState => {
           ? live === "1"
             ? { thread: "running" as const, run: "running" as const }
             : { thread: "failed" as const, run: "failed" as const }
-          : exit === "0"
-            ? { thread: "ready" as const, run: "completed" as const }
+          : // E2B can kill the runner during cleanup after Claude persisted its successful result.
+            exit === "0" || (exit === "137" && succeeded)
+            ? asksForInput
+              ? { thread: "blocked" as const, run: "waiting" as const }
+              : { thread: "ready" as const, run: "completed" as const }
             : exit === "130"
               ? { thread: "blocked" as const, run: "cancelled" as const }
               : { thread: "failed" as const, run: "failed" as const };

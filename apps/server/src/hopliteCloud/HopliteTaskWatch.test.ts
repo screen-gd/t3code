@@ -42,11 +42,13 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
   const state: {
     run: HopliteCloud.HopliteRun | null;
     reply: string | null;
+    taskStatus: HopliteCloudTask["status"];
     /** The caller thread's runs; an active one gets a card. */
     runs: ReadonlyArray<OrchestrationV2Run>;
     cards: ReadonlyArray<OrchestrationV2Subagent>;
     stops: number;
     questions: ReadonlyArray<HopliteCloudQuestion>;
+    questionErrors: Record<string, HopliteCloudError>;
     answers: Array<string>;
     /** Every read fails with this while set. */
     readError: HopliteCloudError | null;
@@ -62,10 +64,12 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
   } = {
     run: null,
     reply: null,
+    taskStatus: "running",
     runs: [],
     cards: [],
     stops: 0,
     questions: [],
+    questionErrors: {},
     answers: [],
     readError: null,
     byRun: {},
@@ -84,7 +88,7 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
           Effect.suspend(() =>
             state.readError === null
               ? Effect.succeed({
-                  task: { ...task, latestReply: state.reply },
+                  task: { ...task, status: state.taskStatus, latestReply: state.reply },
                   run:
                     input?.runId !== undefined && input.runId in state.byRun
                       ? state.byRun[input.runId]!
@@ -94,7 +98,11 @@ const makeHarness = (stored = new Map<string, Uint8Array>()) => {
           ),
         sendMessage: () => Effect.sync(() => ({ runId: state.sendRunIds.shift() ?? null })),
         stopTask: () => Effect.sync(() => (state.stops++, task)),
-        listQuestions: () => Effect.sync(() => state.questions),
+        listQuestions: (input) =>
+          Effect.suspend(() => {
+            const error = state.questionErrors[input.threadId];
+            return error === undefined ? Effect.succeed(state.questions) : Effect.fail(error);
+          }),
         answerQuestion: (input) =>
           Effect.sync(() => (state.answers.push(input.answer), { runId: null })),
       }),
@@ -299,18 +307,32 @@ it.effect("a task's question wakes its caller once, and an answer waits for the 
     harness.state.questions = [question("q_1", "Keep the old session cookie?")];
     yield* watch.sweep;
     const [asked] = wakes(harness.dispatched);
+    assert.isTrue(yield* watch.watching("thr_1"));
+    yield* watch.sweep;
+    assert.equal(wakes(harness.dispatched).length, 1);
+    const restored = makeHarness(harness.stored);
+    restored.state.run = harness.state.run;
+    restored.state.questions = harness.state.questions;
+    yield* Effect.gen(function* () {
+      const watcher = yield* HopliteTaskWatch.HopliteTaskWatch;
+      yield* watcher.sweep;
+      assert.isTrue(yield* watcher.watching("thr_1"));
+      assert.deepStrictEqual(wakes(restored.dispatched), []);
+    }).pipe(Effect.provide(restored.layer));
     assert.strictEqual(asked?.outcome, "updated");
     assert.include(
       asked?.text,
       "Question q_1:\nKeep the old session cookie?\n- Yes: Safer rollout",
     );
 
+    harness.state.taskStatus = "failed";
     const answered = yield* watch.answerQuestion(
       { threadId: "thr_1", questionId: "q_1", answer: "Yes" },
       "t3-thread",
     );
     assert.deepStrictEqual(harness.state.answers, ["Yes"]);
     assert.equal(answered.next, HopliteTaskWatch.HOPLITE_TASK_WAKES_NEXT);
+    assert.equal(answered.status, "running");
 
     // The answer's run has not started, so the asking run is still the latest.
     yield* watch.sweep;
@@ -320,6 +342,73 @@ it.effect("a task's question wakes its caller once, and an answer waits for the 
     harness.state.questions = [question("q_2", "Also drop the legacy route?")];
     yield* watch.sweep;
     assert.include(wakes(harness.dispatched)[1]?.text, "Question q_2:");
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a later run's question does not keep an earlier card waiting", () => {
+  const harness = makeHarness();
+  harness.state.runs = [activeRun];
+  harness.state.cardIds = ["node:first", "node:second"];
+  harness.state.sendRunIds = ["run_1", "run_2"];
+  return Effect.gen(function* () {
+    const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    yield* watch.sendMessage({ threadId: "thr_1", message: "First" }, "t3-thread");
+    yield* watch.sendMessage({ threadId: "thr_1", message: "Second" }, "t3-thread");
+    harness.state.byRun = {
+      run_1: { id: "run_1", status: "completed" },
+      run_2: { id: "run_2", status: "running" },
+    };
+    harness.state.questions = [
+      {
+        questionId: "q_2",
+        runId: "run_2",
+        parts: [{ question: "Which colour?", options: [{ label: "Blue", description: "" }] }],
+      },
+    ];
+    yield* watch.sweep;
+    const waiting = harness.dispatched.filter(
+      (command) =>
+        command.type === "delegated_task.remote.progress" && command.status === "waiting",
+    );
+    assert.deepStrictEqual(
+      waiting.map((command) => ("taskId" in command ? command.taskId : null)),
+      [NodeId.make("node:second")],
+    );
+    const completed = harness.dispatched.filter(
+      (command) => command.type === "delegated_task.remote.complete",
+    );
+    assert.deepStrictEqual(
+      completed.map((command) => ("taskId" in command ? command.taskId : null)),
+      [NodeId.make("node:first")],
+    );
+    assert.equal(wakes(harness.dispatched).length, 1);
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("a failed question read preserves its watch and does not block other tasks", () => {
+  const harness = makeHarness();
+  harness.state.sendRunIds = ["run_1", "run_2"];
+  return Effect.gen(function* () {
+    const watch = yield* HopliteTaskWatch.HopliteTaskWatch;
+    yield* watch.sendMessage({ threadId: "thr_failure", message: "First" }, "t3-thread");
+    yield* watch.sendMessage({ threadId: "thr_1", message: "Second" }, "t3-thread");
+    harness.state.run = { id: "run_2", status: "running" };
+    harness.state.questions = [
+      {
+        questionId: "q_1",
+        parts: [{ question: "Which colour?", options: [{ label: "Blue", description: "" }] }],
+      },
+    ];
+    harness.state.questionErrors.thr_failure = new HopliteCloudError({
+      code: "unavailable",
+      message: "Offline",
+    });
+    yield* watch.sweep;
+    assert.equal(wakes(harness.dispatched).length, 1);
+    assert.isTrue(yield* watch.watching("thr_failure"));
+    delete harness.state.questionErrors.thr_failure;
+    yield* watch.sweep;
+    assert.equal(wakes(harness.dispatched).length, 2);
   }).pipe(Effect.provide(harness.layer));
 });
 

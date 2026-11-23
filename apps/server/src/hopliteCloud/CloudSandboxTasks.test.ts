@@ -177,9 +177,10 @@ it("runs codex turns, resuming the last session on follow-ups", async () => {
   await f.send("second", false);
   assert.equal(await f.run(), 0);
   const args = NodeFS.readFileSync(NodePath.join(f.state, "args.log"), "utf8").split("\n");
+  assert.include(args[0], 'mcp_servers.t3_questions.command="node"');
   assert.include(
     args[0],
-    "@openai/codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-5-codex first",
+    "exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check -m gpt-5-codex first",
   );
   assert.include(args[1], "-m gpt-5-codex resume --last second");
 });
@@ -288,6 +289,19 @@ it("parses a turn's reply from stream-json, old output and a turn still running"
     latestReply: "all done",
     pullRequestUrl: null,
   });
+  for (const question of ["Which colour?", "Which colour?\n- Blue\n- Green"]) {
+    assert.equal(
+      parseTurn({
+        exitCode: 0,
+        output: finished.replace("all done", JSON.stringify(question).slice(1, -1)),
+      }).run.status,
+      "waiting",
+    );
+  }
+  const cleanupExit = finished
+    .replace('"result":"all done"', '"result":"all done","subtype":"success","is_error":false')
+    .replace("exit=0", "exit=137");
+  assert.equal(parseTurn({ exitCode: 0, output: cleanupExit }).run.status, "completed");
   const legacy = [
     "turn=2",
     "exit=0",
