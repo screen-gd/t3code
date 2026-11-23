@@ -213,7 +213,12 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("ServerEnvironmen
         const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
         return yield* serverEnvironment.getDescriptor;
       }).pipe(
-        Effect.provide(layerServerEnvironment(baseDir)),
+        Effect.provide(
+          ServerEnvironment.layer.pipe(
+            Layer.provide(layerEmptySecretStore),
+            Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)),
+          ),
+        ),
         Effect.provideService(HostProcess.Platform, host.platform),
         Effect.provideService(HostProcess.Architecture, host.architecture),
         Effect.provideService(HostProcess.LinuxLibc, "libc" in host ? host.libc : "gnu"),
