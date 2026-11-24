@@ -20,4 +20,13 @@ describe("resolveProviderInstanceAcpRegistryIconUrl", () => {
       }),
     ).toBe("https://cdn.agentclientprotocol.com/registry/v1/latest/generic-agent.svg");
   });
+
+  it("never builds a registry CDN URL for the bundled Hoplite bridge id", () => {
+    expect(
+      resolveProviderInstanceAcpRegistryIconUrl({
+        driverKind: ProviderDriverKind.make("acpRegistry"),
+        agentId: "t3-hoplite",
+      }),
+    ).toBeNull();
+  });
 });

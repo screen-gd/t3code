@@ -41,7 +41,11 @@ import {
 import { cn } from "../../lib/utils";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useStableCallback } from "../../hooks/useStableCallback";
-import { normalizeProviderAccentColor } from "../../providerInstances";
+import {
+  HOPLITE_ACP_AGENT_ID,
+  isHopliteAcpBridgeConfig,
+  normalizeProviderAccentColor,
+} from "../../providerInstances";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { DraftInput } from "../ui/draft-input";
@@ -989,9 +993,11 @@ export function ProviderInstanceCard({
       displayName={displayName}
       accentColor={accentColor}
       acpRegistryAgentId={
-        readConfigString(instance.config, "source") === "local"
-          ? undefined
-          : (readConfigString(instance.config, "agentId") ?? undefined)
+        isHopliteAcpBridgeConfig(instance.config)
+          ? HOPLITE_ACP_AGENT_ID
+          : readConfigString(instance.config, "source") === "local"
+            ? undefined
+            : (readConfigString(instance.config, "agentId") ?? undefined)
       }
       acpRegistryIconUrl={
         readConfigString(instance.config, "source") === "local"

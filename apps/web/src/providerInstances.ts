@@ -20,6 +20,27 @@ import {
 
 export { normalizeProviderAccentColor, shouldShowInstanceBadge };
 
+/**
+ * Marker agent id for the bundled `t3 hoplite-acp` bridge instance. It is local, not a registry
+ * agent, so icon rendering special-cases it to the bundled Hoplite mark instead of a CDN lookup.
+ */
+export const HOPLITE_ACP_AGENT_ID = "t3-hoplite";
+export const HOPLITE_ACP_COMMAND_PATH = "t3";
+export const HOPLITE_ACP_COMMAND_ARGS = ["hoplite-acp"] as const;
+
+/** True only for a local ACP config launching exactly the bundled Hoplite bridge command. */
+export function isHopliteAcpBridgeConfig(config: unknown): boolean {
+  if (config === null || typeof config !== "object") return false;
+  const { source, commandPath, commandArgs } = config as Record<string, unknown>;
+  return (
+    source === "local" &&
+    commandPath === HOPLITE_ACP_COMMAND_PATH &&
+    Array.isArray(commandArgs) &&
+    commandArgs.length === HOPLITE_ACP_COMMAND_ARGS.length &&
+    HOPLITE_ACP_COMMAND_ARGS.every((arg, index) => commandArgs[index] === arg)
+  );
+}
+
 /** Placeholder for untargetable drafts. Never persist or dispatch it; disable send until replaced. */
 export const NO_PROVIDER_MODEL_SELECTION: ModelSelection = {
   instanceId: ProviderInstanceId.make("t3code_no_provider"),
@@ -171,7 +192,9 @@ function applyProviderInstanceBranding(
       ? (explicitInstance.config as Readonly<Record<string, unknown>>)
       : null;
   if (config?.source === "local") {
-    return { ...entry, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
+    return isHopliteAcpBridgeConfig(config)
+      ? { ...entry, acpRegistryAgentId: HOPLITE_ACP_AGENT_ID, acpRegistryIconUrl: undefined }
+      : { ...entry, acpRegistryAgentId: undefined, acpRegistryIconUrl: undefined };
   }
   const agentId = config?.agentId;
   const iconUrl = config?.registryIconUrl;

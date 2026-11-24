@@ -41,8 +41,23 @@ without expanding shell expressions.
 
 ## Where agents run
 
-Registry agents always run on the machine that hosts your T3 Code server. That stays true when you
+Registry commands launch on the machine that hosts your T3 Code server. That stays true when you
 connect through `app.t3.codes`, T3 Connect, or a relay.
+
+### Hoplite
+
+Connect Hoplite under **Settings → Environments → Cloud sandboxes**, then select **Hoplite** in
+**Settings → Providers → Add provider**. It uses the saved connection on that environment.
+T3 includes the bridge, so the Hoplite CLI is not required, including on Windows.
+
+Start a thread with this provider to chat directly with Hoplite. Models, reasoning settings,
+streamed progress, questions, and follow-ups come from its ACP connection. The cloud project is
+matched to the folder's GitHub origin remote; set `HOPLITE_PROJECT_ID` in the provider's environment
+variables to choose a project explicitly. `HOPLITE_API_KEY` can override the shared connection.
+
+Work runs in Hoplite's cloud checkout. Local uncommitted changes are not uploaded, and local
+checkpoints do not restore cloud files. Ask Hoplite to push its branch or open a pull request to
+bring changes back. Configure the agent's MCP servers in Hoplite's project settings.
 
 Agents install under `tools/<agent-id>/<version>/` inside T3 home. T3 Code verifies SHA-256 when the Registry entry
 provides one; entries without a checksum retain the Registry's HTTPS distribution guarantee.

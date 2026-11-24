@@ -15,6 +15,7 @@ import type { AcpRegistryDistributionPreference } from "../settings.ts";
 import type { AcpRegistrySettings } from "../settings.ts";
 import { cliArchiveTarCommand } from "@t3tools/shared/cliRelease";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import { resolveSelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
 import {
   mergePathEntries,
   resolveSpawnCommand,
@@ -667,9 +668,10 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
     digester.digest(Digest.sha256, data).pipe(Effect.map(Hex.encode), Effect.orDie);
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const selfInvocation = yield* resolveSelfInvocation();
   const httpClient = yield* HttpClient.HttpClient;
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const { settings: hostSettings } = yield* ProviderHost.ProviderHost;
+  const { settings: hostSettings, paths: hostPaths } = yield* ProviderHost.ProviderHost;
   const platform = yield* HostProcess.Platform;
   const architecture = yield* HostProcess.Architecture;
   const hostEnvironment = yield* HostProcess.Environment;
@@ -1838,6 +1840,13 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
       if (settings.source === "local") {
         const command = settings.commandPath.trim();
         if (!command) return { status: "unconfigured" } as const;
+        if (command === "t3")
+          return {
+            status: "ready",
+            agentId: command,
+            version: null,
+            distribution: "local",
+          } as const;
         const executable = yield* resolveExecutable(command, environment ?? hostEnvironment);
         if (executable !== undefined) yield* validateLocalExecutable(executable);
         return executable === undefined
@@ -2039,6 +2048,19 @@ export const makeAcpRegistryCatalog = Effect.fn("AcpRegistryCatalog.make")(funct
           });
         }
         const env = environment ?? hostEnvironment;
+        if (executable === "t3") {
+          const invocation = selfInvocation;
+          return {
+            distribution: "local",
+            spawn: {
+              command: invocation.command,
+              args: selfInvocationArgs(invocation, settings.commandArgs),
+              cwd,
+              env: { ...env, T3CODE_PROVIDER_STATE_DIR: hostPaths.stateDir },
+              shell: false,
+            },
+          } satisfies ResolvedAcpRegistryAgent;
+        }
         const command = yield* resolveExecutable(executable, env);
         if (command === undefined) {
           return yield* new AcpRegistryError({
