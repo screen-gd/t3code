@@ -1,4 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import type { CloudTaskChatEvent } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -13,6 +14,7 @@ import { HttpClient, HttpClientResponse, UrlParams } from "effect/http";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { connectEnvelope } from "./CloudSandboxProviders.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
+import * as DevinCloud from "./DevinCloud.ts";
 
 const KEYS = { e2b: "e2b_good_key", daytona: "dtn_good_key", agent37: "sk_live_good_key" };
 const ANTHROPIC_KEY = "sk-ant-model-secret";
@@ -174,6 +176,8 @@ const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {
     return respond(404, {});
   });
   const layer = HopliteCloud.layer.pipe(
+    Layer.provide(DevinCloud.layer),
+    Layer.provide(NodeServices.layer),
     Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, secrets)),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
     Layer.provide(Layer.succeed(HostProcess.Environment, environment)),

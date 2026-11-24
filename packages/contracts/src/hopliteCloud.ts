@@ -8,7 +8,13 @@ import { NodeId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
  * holding a provider's API key starts and reads tasks there; clients and agents only
  * ever see task records, never a key.
  */
-export const CloudSandboxProvider = Schema.Literals(["hoplite", "e2b", "daytona", "agent37"]);
+export const CloudSandboxProvider = Schema.Literals([
+  "hoplite",
+  "e2b",
+  "daytona",
+  "agent37",
+  "devin",
+]);
 export type CloudSandboxProvider = typeof CloudSandboxProvider.Type;
 
 /** The agent a sandbox task runs: Claude Code by default, or Codex. */
@@ -66,11 +72,14 @@ export const HopliteCloudClearAgentCredentialInput = Schema.Struct({
 export type HopliteCloudClearAgentCredentialInput =
   typeof HopliteCloudClearAgentCredentialInput.Type;
 
-export const HopliteCloudConnectInput = Schema.Struct({
-  /** Omitted means Hoplite. */
-  provider: Schema.optional(CloudSandboxProvider),
-  apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
-});
+export const HopliteCloudConnectInput = Schema.Union([
+  Schema.Struct({
+    /** Omitted means Hoplite. */
+    provider: Schema.optional(Schema.Literals(["hoplite", "e2b", "daytona", "agent37"])),
+    apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  }),
+  Schema.Struct({ provider: Schema.Literal("devin") }),
+]);
 export type HopliteCloudConnectInput = typeof HopliteCloudConnectInput.Type;
 
 export const HopliteCloudDisconnectInput = Schema.Struct({

@@ -290,16 +290,24 @@ For Antigravity's Google callback on a remote host, see
 
 T3 Code can hand tasks to cloud sandboxes from [Hoplite](https://hoplite.sh),
 [E2B](https://e2b.dev), [Daytona](https://daytona.io) and
-[Agent37](https://agent37.com). Open **Settings → Environments**, find the
+[Agent37](https://agent37.com), and [Devin Cloud](https://devin.ai). Open **Settings → Environments**, find the
 provider under **Cloud sandboxes**, and choose **Connect** to add its API key.
 Each key stays on the machine running T3 Code; clients and agents never see it.
 **Disconnect** removes a provider's key.
+
+For **Devin Cloud**, install the Devin CLI and run `devin auth login` on the machine running
+T3 Code, then choose **Connect**. It uses that login and your account's cloud allowance;
+no API key or Claude/Codex credential is needed. Disconnecting removes T3's connection
+without signing you out of the Devin CLI.
 
 Agents can then start a task with the repository it names, follow up on it, and
 get its pull request back in the chat. Each provider bills its tasks to your
 account there.
 
 - **Hoplite** runs its own cloud agent, on a model you pick.
+- **Devin Cloud** runs Devin on its own VM with your account defaults. Tasks support live
+  progress, follow-ups, questions, and cancellation. Leave `agent`, `model`, and `template`
+  out. Open previews in Devin; T3 does not expose a Devin VM as an empty sandbox.
 - **E2B, Daytona and Agent37** start a new sandbox per task, clone the
   repository into it, and run the chosen `agent` there: `claude` (the
   default) or `codex`. Claude signs in with the credential under **Claude
