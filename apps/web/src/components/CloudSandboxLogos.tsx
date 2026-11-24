@@ -1,6 +1,7 @@
 import type { CloudSandboxProvider } from "@t3tools/contracts";
 
 import { msg } from "gt-react";
+import { CloudIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { Agent37Icon, DaytonaIcon, E2BIcon, HopliteIcon, type Icon } from "./Icons";
@@ -16,6 +17,15 @@ export interface CloudSandboxProviderInfo {
 
 /** Every cloud sandbox provider the server can hold a key for, in the order shown. */
 export const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProviderInfo> = [
+  {
+    id: "devin",
+    name: "Devin Cloud",
+    icon: CloudIcon,
+    keyPlaceholder: "",
+    keyHelp: msg(
+      "Uses the Devin CLI login on this environment. Install Devin and run `devin auth login` first.",
+    ),
+  },
   {
     id: "hoplite",
     name: "Hoplite",

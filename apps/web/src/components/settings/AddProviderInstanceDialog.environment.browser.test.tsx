@@ -149,6 +149,24 @@ function setup() {
 }
 
 describe("AddProviderInstanceDialog environment routing", () => {
+  it("adds Hoplite with the bundled cloud bridge on the selected environment", async () => {
+    setup();
+    await using screen = await render(dialog());
+    await screen.getByRole("radio", { name: "Hoplite", exact: true }).click();
+    await click("Next");
+    await click("Add instance");
+    expect(settingsHooks.mutate).toHaveBeenCalledWith({
+      operation: "create",
+      instanceId: "acpRegistry_hoplite",
+      instance: {
+        driver: "acpRegistry",
+        enabled: true,
+        displayName: "Hoplite",
+        config: { source: "local", commandPath: "t3", commandArgs: ["hoplite-acp"] },
+      },
+    });
+    expect(actions.onOpenChange).toHaveBeenCalledWith(false);
+  });
   it("chooses an unused identity for another account without replacing configured instances", async () => {
     setup();
     settingsHooks.read.mockReturnValue({

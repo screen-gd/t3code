@@ -2848,7 +2848,10 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.hopliteCloudGetStatus]: (_input) => hopliteCloud.status,
         [WS_METHODS.hopliteCloudConnect]: (input) =>
-          hopliteCloud.connect(input.provider ?? "hoplite", input.apiKey),
+          hopliteCloud.connect(
+            input.provider ?? "hoplite",
+            "apiKey" in input ? input.apiKey : undefined,
+          ),
         [WS_METHODS.hopliteCloudDisconnect]: (input) =>
           hopliteCloud.disconnect(input.provider ?? "hoplite"),
         [WS_METHODS.hopliteCloudSetAgentCredential]: (input) =>

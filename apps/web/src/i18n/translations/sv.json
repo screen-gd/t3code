@@ -12832,5 +12832,8 @@
   "99d51127f573296b": "Ett konto till",
   "8ec2c57414669b79": "Anslut en andra {tracker}-arbetsyta eller användare.",
   "99963c0142e17f00": "För det nya {tracker}-kontot.",
-  "6d8e4ebc889bace9": "Lägg till konto"
+  "6d8e4ebc889bace9": "Lägg till konto",
+  "f4cc8d9998d3662d": "Använder inloggningen i Devin CLI i den här miljön. Installera först Devin och kör `devin auth login`.",
+  "857e609564db2202": "Kontrollera anslutningen",
+  "a586e79f329ec55d": "Din Devin-inloggning stannar i den här miljön."
 }

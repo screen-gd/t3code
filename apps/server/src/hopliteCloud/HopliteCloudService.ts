@@ -32,6 +32,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -42,6 +43,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as DevinCloud from "./DevinCloud.ts";
 import {
   type AgentKeys,
   type CommandResult,
@@ -83,6 +85,7 @@ const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = [
   "e2b",
   "daytona",
   "agent37",
+  "devin",
 ];
 /** Hoplite keeps the name its key had before other providers were added. */
 const apiKeySecretFor = (provider: CloudSandboxProvider) =>
@@ -218,7 +221,7 @@ export class HopliteCloud extends Context.Service<
     readonly connected: Effect.Effect<boolean>;
     readonly connect: (
       provider: CloudSandboxProvider,
-      apiKey: string,
+      apiKey?: string,
     ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly disconnect: (
       provider: CloudSandboxProvider,
@@ -307,6 +310,7 @@ const TASK_ID_FORMATS: Record<CloudSandboxProvider, RegExp> = {
   e2b: /^[a-z0-9]{1,64}$/,
   daytona: /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/,
   agent37: /^[a-z0-9]{1,64}$/,
+  devin: /^devin-[a-f0-9]{32}$/,
 };
 const MAX_SANDBOX_OUTPUT = 100_000;
 const MAX_REMEMBERED_REQUESTS = 500;
@@ -367,6 +371,8 @@ const make = Effect.gen(function* () {
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* HostProcess.Environment;
   const random = yield* SecureRandom.SecureRandom;
+  const devin = yield* DevinCloud.DevinCloud;
+  const devinWrites = yield* Semaphore.make(1);
 
   const readSecret = (name: string) =>
     secrets.get(name).pipe(
@@ -656,17 +662,19 @@ const make = Effect.gen(function* () {
 
   // One project is enough to prove a Hoplite key works.
   const verifyKey = (provider: CloudSandboxProvider, apiKey: string) =>
-    provider === "hoplite"
-      ? Effect.asVoid(
-          send(
-            apiKey,
-            HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
-              HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
+    provider === "devin"
+      ? devin.verify
+      : provider === "hoplite"
+        ? Effect.asVoid(
+            send(
+              apiKey,
+              HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
+                HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
+              ),
+              ProjectsPage,
             ),
-            ProjectsPage,
-          ),
-        )
-      : sessionOf(provider).verify(apiKey);
+          )
+        : sessionOf(provider).verify(apiKey);
 
   // Normalized repo -> project id, so a task skips listing every project. Cleared whenever the
   // key changes, as another key may see other projects.
@@ -725,8 +733,14 @@ const make = Effect.gen(function* () {
 
   const connect = Effect.fn("HopliteCloud.connect")(function* (
     provider: CloudSandboxProvider,
-    apiKey: string,
+    apiKey?: string,
   ) {
+    if (provider === "devin") {
+      yield* devin.verify;
+      yield* saveSecret(apiKeySecretFor(provider), "cli-login");
+      return yield* status;
+    }
+    if (apiKey === undefined) return yield* failure("invalid_key", provider);
     // Check the key before saving it so a typo never replaces a working one.
     yield* verifyKey(provider, apiKey);
     yield* retire(apiKeySecretFor(provider));
@@ -738,6 +752,11 @@ const make = Effect.gen(function* () {
   const disconnect = Effect.fn("HopliteCloud.disconnect")(function* (
     provider: CloudSandboxProvider,
   ) {
+    if (provider === "devin") {
+      yield* devin.disconnect;
+      yield* removeSecret(apiKeySecretFor(provider));
+      return yield* status;
+    }
     yield* retire(apiKeySecretFor(provider));
     yield* removeSecret(apiKeySecretFor(provider));
     projectIds.clear();
@@ -823,6 +842,10 @@ const make = Effect.gen(function* () {
     title,
   }: HopliteCloudGetTaskInput & { readonly runId?: string; readonly title?: string }) {
     const { provider, id: threadId } = yield* taskOf(taskId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devin.read(threadId, runId);
+    }
     if (provider !== "hoplite") return yield* sessionTask(provider, threadId, runId, title);
     const apiKey = yield* requireKey;
     const [thread, activeRunId] = yield* Effect.all(
@@ -936,6 +959,27 @@ const make = Effect.gen(function* () {
     input: HopliteCloudStartTaskInput,
   ) {
     const provider = input.provider ?? "hoplite";
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devinWrites.withPermit(
+        remembered(
+          startedTasks,
+          input.clientRequestId === undefined
+            ? undefined
+            : [
+                "devin",
+                input.clientRequestId,
+                input.prompt,
+                input.repo,
+                input.title,
+                input.model,
+                input.agent,
+                input.template,
+              ].join("\u0000"),
+          devin.start(input),
+        ),
+      );
+    }
     if (provider !== "hoplite") {
       return yield* remembered(
         startedTasks,
@@ -1055,6 +1099,19 @@ const make = Effect.gen(function* () {
     input: HopliteCloudSendMessageInput,
   ) {
     const { provider, id } = yield* taskOf(input.threadId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      if (input.model !== undefined) return yield* failure("unsupported", provider);
+      return yield* devinWrites.withPermit(
+        remembered(
+          sentMessages,
+          input.clientRequestId === undefined
+            ? undefined
+            : [input.threadId, input.clientRequestId, input.message].join("\u0000"),
+          devin.send(id, input.message),
+        ),
+      );
+    }
     if (provider !== "hoplite") {
       return yield* remembered(
         sentMessages,
@@ -1083,6 +1140,10 @@ const make = Effect.gen(function* () {
     threadId,
   }: HopliteCloudGetTaskInput) {
     const session = yield* taskOf(threadId);
+    if (session.provider === "devin") {
+      yield* keyFor("devin");
+      return (yield* devin.stop(session.id)).task;
+    }
     if (session.provider !== "hoplite") {
       const apiKey = yield* keyFor(session.provider);
       yield* sessionOf(session.provider).exec(apiKey, session.id, STOP_SCRIPT, {});
@@ -1108,6 +1169,12 @@ const make = Effect.gen(function* () {
     port,
   }: HopliteCloudPreviewInput) {
     const { provider, id } = yield* taskOf(threadId);
+    if (provider === "devin")
+      return {
+        status: "unsupported",
+        url: null,
+        reason: "Devin Cloud previews are available in the Devin session.",
+      } satisfies HopliteCloudPreview;
     if (provider !== "hoplite") {
       const apiKey = yield* keyFor(provider);
       return yield* sessionOf(provider)
@@ -1154,6 +1221,10 @@ const make = Effect.gen(function* () {
     threadId,
   }: HopliteCloudGetTaskInput) {
     const { provider, id } = yield* taskOf(threadId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devin.questions(id);
+    }
     if (provider !== "hoplite") {
       const result = yield* sessionOf(provider).exec(
         yield* keyFor(provider),
@@ -1173,6 +1244,14 @@ const make = Effect.gen(function* () {
     input: HopliteCloudAnswerInput,
   ) {
     const { provider, id } = yield* taskOf(input.threadId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devin.answer(
+        id,
+        input.questionId,
+        input.dismiss === true ? null : input.answer,
+      );
+    }
     if (provider !== "hoplite") {
       if (!/^q_[a-f0-9]{32}$/.test(input.questionId)) return yield* invalidId(provider, "question");
       const result = yield* sessionOf(provider).exec(
@@ -1276,6 +1355,14 @@ const make = Effect.gen(function* () {
 
   const watchThreadChat = (taskId: string, activity: Stream.Stream<void>) => {
     const parsed = providerOfTask(taskId);
+    if (parsed.provider === "devin")
+      return Stream.unwrap(
+        Effect.gen(function* () {
+          yield* taskOf(taskId);
+          yield* keyFor("devin");
+          return devin.watch(parsed.id);
+        }),
+      );
     if (parsed.provider !== "hoplite") {
       const provider = parsed.provider;
       return Stream.unwrap(
@@ -1313,7 +1400,8 @@ const make = Effect.gen(function* () {
 
   const sandboxOf = Effect.fn("HopliteCloud.sandboxOf")(function* (sandboxId: string) {
     const { provider, id } = yield* taskOf(sandboxId);
-    if (provider === "hoplite") return yield* invalidId("hoplite", "sandbox");
+    if (provider === "hoplite" || provider === "devin")
+      return yield* invalidId(provider, "sandbox");
     return { provider, id, apiKey: yield* keyFor(provider) };
   });
 

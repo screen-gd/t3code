@@ -12820,5 +12820,8 @@
   "99d51127f573296b": "Otra cuenta",
   "8ec2c57414669b79": "Conecta un segundo espacio de trabajo o usuario de {tracker}.",
   "99963c0142e17f00": "Para la nueva cuenta de {tracker}.",
-  "6d8e4ebc889bace9": "Añadir cuenta"
+  "6d8e4ebc889bace9": "Añadir cuenta",
+  "f4cc8d9998d3662d": "Usa el inicio de sesión de Devin CLI en este entorno. Instala Devin y ejecuta `devin auth login` primero.",
+  "857e609564db2202": "Comprobar conexión",
+  "a586e79f329ec55d": "Tu inicio de sesión de Devin permanece en este entorno."
 }

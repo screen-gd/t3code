@@ -148,6 +148,38 @@ const makeFakeUvToolchain = Effect.fn("AcpRegistrySupport.test.makeFakeUvToolcha
 });
 
 describe("AcpRegistrySupport", () => {
+  it.effect("launches bundled T3 ACP commands from this server and preserves its environment", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const root = yield* fs.makeTempDirectoryScoped();
+      const resolver = yield* AcpRegistrySupport.makeAcpRegistryCatalog({
+        cacheDir: root,
+        toolsDir: `${root}/tools`,
+        registryUrl,
+      });
+      const config = settings({ source: "local", commandPath: "t3", commandArgs: ["hoplite-acp"] });
+      expect((yield* resolver.inspect(config, { PATH: "/missing" })).status).toBe("ready");
+      const resolved = yield* resolver.resolve(config, "/checkout", {
+        PATH: "/missing",
+        HOPLITE_PROJECT_ID: "project-1",
+      });
+      expect(resolved.spawn.command).toBe("/runtime/node");
+      expect(resolved.spawn.args).toEqual([path.resolve("/runtime/t3.ts"), "hoplite-acp"]);
+      expect(resolved.spawn.cwd).toBe("/checkout");
+      expect(resolved.spawn.env).toMatchObject({
+        HOPLITE_PROJECT_ID: "project-1",
+        T3CODE_PROVIDER_STATE_DIR: expect.any(String),
+      });
+      expect(resolved.spawn.shell).toBe(false);
+    }).pipe(
+      Effect.scoped,
+      Effect.provideService(HostProcess.ExecutablePath, "/runtime/node"),
+      Effect.provideService(HostProcess.IsExecutable, false),
+      Effect.provideService(HostProcess.Arguments, ["/runtime/node", "/runtime/t3.ts"]),
+      Effect.provide(layerResolver(() => Effect.die("bundled ACP must not request the registry"))),
+    ),
+  );
   it("selects the preferred compatible distribution", () => {
     const agent = makeAgent({
       binary: {

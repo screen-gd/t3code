@@ -11,6 +11,7 @@ import * as CliError from "effect/cli/CliError";
 import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { acpMcpBridgeCommand, acpMcpCallCommand } from "./cli/acpMcpBridge.ts";
+import { hopliteAcpCommand } from "./cli/hopliteAcp.ts";
 import { authCommand } from "./cli/auth.ts";
 import { environmentCommand } from "./cli/environment.ts";
 import { appCommand } from "./cli/app.ts";
@@ -83,6 +84,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
         ),
       ),
       acpMcpBridgeCommand,
+      hopliteAcpCommand,
       acpMcpCallCommand,
       startCommand,
       serveCommand,

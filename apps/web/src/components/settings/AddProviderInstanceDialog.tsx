@@ -1,6 +1,7 @@
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m as resolveMessage } from "~/i18n/messages";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
+import { HopliteIcon } from "../Icons";
 
 import { Radio as RadioPrimitive } from "@base-ui/react/radio";
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
@@ -69,6 +70,8 @@ import { useSecretSources } from "./SecretSourceInput";
 const INSTANCE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 const ACP_REGISTRY_DRIVER_KIND = ProviderDriverKind.make("acpRegistry");
+const HOPLITE_PRESET_VALUE = "preset:hoplite";
+const HOPLITE_LABEL = "Hoplite";
 const DEFAULT_DRIVER_OPTION = providerClients.definitions[0]!;
 const DRIVER_OPTIONS = providerClients.definitions.filter(
   (option) => option.driverKind !== ACP_REGISTRY_DRIVER_KIND,
@@ -96,16 +99,41 @@ function ProviderOptionGrid({
   options,
   value,
   disabled,
+  includeHoplite = false,
   onValueChange,
   ...labelProps
 }: {
   readonly options: ReadonlyArray<ProviderClientDefinition>;
-  readonly value: ProviderDriverKind;
+  readonly value: string;
+  readonly includeHoplite?: boolean;
   readonly disabled: boolean;
   readonly onValueChange: (value: string) => void;
   readonly "aria-label"?: string;
   readonly "aria-labelledby"?: string;
 }) {
+  const optionsWithIcons = options.map((option) => ({
+    id: option.driverKind,
+    label: option.label,
+    badgeLabel: option.badgeLabel,
+    icon: (
+      <ProviderInstanceIcon
+        driverKind={option.driverKind}
+        displayName={option.label}
+        iconClassName="size-4"
+      />
+    ),
+  }));
+  const choices = includeHoplite
+    ? [
+        ...optionsWithIcons,
+        {
+          id: HOPLITE_PRESET_VALUE,
+          label: HOPLITE_LABEL,
+          badgeLabel: undefined,
+          icon: <HopliteIcon aria-hidden className="size-4" />,
+        },
+      ]
+    : optionsWithIcons;
   return (
     <RadioGroup
       {...labelProps}
@@ -114,17 +142,13 @@ function ProviderOptionGrid({
       onValueChange={onValueChange}
       className="grid grid-cols-1 sm:grid-cols-2"
     >
-      {options.map((option) => (
+      {choices.map((option) => (
         <RadioPrimitive.Root
-          key={option.driverKind}
-          value={option.driverKind}
+          key={option.id}
+          value={option.id}
           className="relative flex cursor-pointer items-center gap-3 rounded-lg bg-card px-3 py-3 text-left text-muted-foreground outline-none ring-1 ring-black/5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-checked:bg-primary/8 data-checked:text-foreground data-checked:ring-2 data-checked:ring-inset data-checked:ring-primary data-checked:hover:bg-primary/8 dark:bg-white/3 dark:ring-white/5 dark:hover:bg-white/5 dark:data-checked:bg-primary/15 dark:data-checked:ring-primary dark:data-checked:hover:bg-primary/15"
         >
-          <ProviderInstanceIcon
-            driverKind={option.driverKind}
-            displayName={option.label}
-            iconClassName="size-4"
-          />
+          {option.icon}
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
             {option.label}
           </span>
@@ -244,6 +268,11 @@ export function AddProviderInstanceDialog({
 
   const configDraft = configByDriver[driver] ?? EMPTY_CONFIG_DRAFT;
   const isLocalAcp = isAcpRegistry && isManualAcpConfiguration && configDraft.source === "local";
+  const isHoplite =
+    isLocalAcp &&
+    configDraft.commandPath === "t3" &&
+    Array.isArray(configDraft.commandArgs) &&
+    configDraft.commandArgs[0] === "hoplite-acp";
   const localCommandPath =
     typeof configDraft.commandPath === "string" ? configDraft.commandPath.trim() : "";
   const manualAgentId = typeof configDraft.agentId === "string" ? configDraft.agentId.trim() : "";
@@ -256,7 +285,11 @@ export function AddProviderInstanceDialog({
       : gt("Select an ACP or configure one manually.");
   const wizardStepSummaries = isAcpRegistry
     ? ([
-        isLocalAcp ? gt("Local ACP command") : (selectedAcp?.name ?? (manualAgentId || null)),
+        isHoplite
+          ? HOPLITE_LABEL
+          : isLocalAcp
+            ? gt("Local ACP command")
+            : (selectedAcp?.name ?? (manualAgentId || null)),
         previewLabel,
         null,
       ] as const)
@@ -273,6 +306,28 @@ export function AddProviderInstanceDialog({
     });
   };
   const selectDriver = (value: string) => {
+    if (value === HOPLITE_PRESET_VALUE) {
+      setDriver(ACP_REGISTRY_DRIVER_KIND);
+      setSelectedAcp(null);
+      setIsManualAcpConfiguration(true);
+      setShowMoreProviders(false);
+      setConfigByDriver((existing) => ({
+        ...existing,
+        [ACP_REGISTRY_DRIVER_KIND]: {
+          source: "local",
+          commandPath: "t3",
+          commandArgs: ["hoplite-acp"],
+        },
+      }));
+      setIdentityByDriver((existing) =>
+        updateProviderIdentityDraft(existing, ACP_REGISTRY_DRIVER_KIND, {
+          label: HOPLITE_LABEL,
+          instanceIdOverride: null,
+        }),
+      );
+      setHasAttemptedSubmit(false);
+      return;
+    }
     setDriver(ProviderDriverKind.make(value));
     setIsManualAcpConfiguration(false);
     setHasAttemptedSubmit(false);
@@ -500,11 +555,19 @@ export function AddProviderInstanceDialog({
                 </div>
                 <ProviderOptionGrid
                   options={featuredDriverOptions}
-                  value={driver}
+                  value={isHoplite ? HOPLITE_PRESET_VALUE : driver}
+                  includeHoplite={acpRegistryAllowed}
                   disabled={isPreparingRegistryAgent}
                   onValueChange={selectDriver}
                   aria-labelledby="add-instance-driver-label"
                 />
+                {isHoplite ? (
+                  <p className="text-xs text-muted-foreground">
+                    <T>
+                      Uses your Hoplite connection in Environments. Code runs in Hoplite’s cloud.
+                    </T>
+                  </p>
+                ) : null}
                 <MultipleAccountsNote environmentId={environmentId} driver={driver} />
               </div>
 

@@ -14,7 +14,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
  * Their tasks have ids `<provider>:<sandbox id>` so every call finds its provider again;
  * Hoplite's keep their bare thread ids.
  */
-export type SessionProvider = Exclude<CloudSandboxProvider, "hoplite">;
+export type SessionProvider = Exclude<CloudSandboxProvider, "hoplite" | "devin">;
 const SESSION_PROVIDERS: ReadonlyArray<SessionProvider> = ["e2b", "daytona", "agent37"];
 
 export const PROVIDER_NAMES: Record<CloudSandboxProvider, string> = {
@@ -22,6 +22,7 @@ export const PROVIDER_NAMES: Record<CloudSandboxProvider, string> = {
   e2b: "E2B",
   daytona: "Daytona",
   agent37: "Agent37",
+  devin: "Devin Cloud",
 };
 
 const E2B_API_BASE_URL = "https://api.e2b.app";
@@ -35,6 +36,7 @@ const COMMAND_TIMEOUT = "11 minutes";
 export const providerOfTask = (
   taskId: string,
 ): { readonly provider: CloudSandboxProvider; readonly id: string } => {
+  if (taskId.startsWith("devin:")) return { provider: "devin", id: taskId.slice(6) };
   for (const provider of SESSION_PROVIDERS) {
     if (taskId.startsWith(`${provider}:`)) {
       return { provider, id: taskId.slice(provider.length + 1) };

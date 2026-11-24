@@ -36,6 +36,7 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import { forkParked } from "../serverActivation.ts";
 import { PROVIDER_NAMES, providerOfTask } from "./CloudSandboxProviders.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
+import * as DevinCloud from "./DevinCloud.ts";
 import { replyNeedsInput } from "./CloudSandboxTasks.ts";
 
 // Survives restarts with the key it belongs to; holds thread ids only.
@@ -780,6 +781,6 @@ export const layer = Layer.effect(HopliteTaskWatch, make);
 
 /** One watcher per server: MCP tools and the task's chat pane share its watches. */
 export const layerLive = layer.pipe(
-  Layer.provideMerge(HopliteCloud.layer),
+  Layer.provideMerge(HopliteCloud.layer.pipe(Layer.provide(DevinCloud.layer))),
   Layer.provide(ProjectionStore.layer),
 );
