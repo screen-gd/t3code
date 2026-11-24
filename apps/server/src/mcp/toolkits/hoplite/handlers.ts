@@ -32,6 +32,7 @@ const handlers = {
     ({
       threadId,
       questionId,
+      dismiss,
       prompt,
       provider,
       model,
@@ -70,6 +71,7 @@ const handlers = {
                         threadId,
                         questionId,
                         answer: prompt,
+                        ...(dismiss === undefined ? {} : { dismiss }),
                         ...(clientRequestId === undefined ? {} : { clientRequestId }),
                       },
                       caller,

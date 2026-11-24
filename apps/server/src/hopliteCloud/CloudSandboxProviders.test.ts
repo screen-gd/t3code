@@ -1,4 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import type { CloudTaskChatEvent } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -13,6 +14,7 @@ import { HttpClient, HttpClientResponse, UrlParams } from "effect/http";
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import { connectEnvelope } from "./CloudSandboxProviders.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
+import * as DevinCloud from "./DevinCloud.ts";
 
 const KEYS = { e2b: "e2b_good_key", daytona: "dtn_good_key", agent37: "sk_live_good_key" };
 const ANTHROPIC_KEY = "sk-ant-model-secret";
@@ -174,6 +176,8 @@ const makeHarness = (environment: NodeJS.ProcessEnv, options: HarnessOptions = {
     return respond(404, {});
   });
   const layer = HopliteCloud.layer.pipe(
+    Layer.provide(DevinCloud.layer),
+    Layer.provide(NodeServices.layer),
     Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, secrets)),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
     Layer.provide(Layer.succeed(HostProcess.Environment, environment)),
@@ -715,15 +719,18 @@ it.effect("a retried task or follow-up with the same clientRequestId runs once",
     const start = {
       provider: "daytona",
       prompt: "Fix",
+      title: "Key test",
       repo: "acme/web",
       clientRequestId: "req-1",
     } as const;
     const first = yield* cloud.startTask(start);
+    assert.equal((yield* cloud.getTask({ threadId: first.task.threadId })).title, "Key test");
     assert.deepStrictEqual(yield* cloud.startTask(start), first);
     const followUp = { threadId: "daytona:dsb-1", message: "More", clientRequestId: "req-2" };
     const sent = yield* cloud.sendMessage(followUp);
     assert.deepStrictEqual(sent, { runId: "turn-2" });
     assert.deepStrictEqual(yield* cloud.sendMessage(followUp), sent);
+    assert.equal((yield* cloud.getTask({ threadId: first.task.threadId })).title, "Key test");
     yield* cloud.startTask({ ...start, prompt: "Another task" });
     const created = harness.sent.filter(
       (request) => request.method === "POST" && request.url.endsWith("/api/sandbox"),
@@ -735,6 +742,33 @@ it.effect("a retried task or follow-up with the same clientRequestId runs once",
     assert.lengthOf(turns, 3);
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect.each(["e2b", "daytona"] as const)(
+  "%s preserves a legacy task title across follow-ups and server restarts",
+  (provider) => {
+    const harness = makeHarness(agentEnvironment);
+    const threadId = provider === "e2b" ? "e2b:isb1" : "daytona:dsb-1";
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const cloud = yield* HopliteCloud.HopliteCloud;
+        yield* cloud.connect(provider, KEYS[provider]);
+        assert.equal(
+          (yield* cloud.readTask({ threadId, title: "Key test" })).task.title,
+          "Key test",
+        );
+      }).pipe(Effect.provide(harness.layer));
+      yield* Effect.gen(function* () {
+        const cloud = yield* HopliteCloud.HopliteCloud;
+        yield* cloud.sendMessage({ threadId, message: "Continue" });
+        assert.equal((yield* cloud.getTask({ threadId })).title, "Key test");
+        assert.equal(
+          (yield* cloud.readTask({ threadId, title: "Replacement" })).task.title,
+          "Key test",
+        );
+      }).pipe(Effect.provide(harness.layer));
+    });
+  },
+);
 
 it.effect("reports E2B's RPC error instead of an empty result", () => {
   const harness = makeHarness(agentEnvironment, { e2bError: true });

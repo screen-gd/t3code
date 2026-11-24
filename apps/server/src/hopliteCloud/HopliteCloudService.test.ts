@@ -1,12 +1,15 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse, UrlParams } from "effect/http";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
+import * as DevinCloud from "./DevinCloud.ts";
 
 const GOOD_KEY = "hop_svc_good";
 const REVOKED_KEY = "hop_svc_revoked";
@@ -31,7 +34,7 @@ const thread = {
 };
 
 // A Hoplite API that accepts GOOD_KEY only, and records what it was sent.
-const makeHarness = () => {
+const makeHarness = (devin?: DevinCloud.DevinCloud["Service"]) => {
   const stored = new Map<string, Uint8Array>();
   const sent: Array<Sent> = [];
   /** Paths that answer with this status instead, as a flaky or rate-limited Hoplite would. */
@@ -146,7 +149,13 @@ const makeHarness = () => {
         ],
       });
     }
-    if (request.method === "POST" && url.pathname === "/api/threads/thr_1/questions/q_1") {
+    if (
+      request.method === "POST" &&
+      [
+        "/api/threads/thr_1/questions/q_1",
+        "/api/threads/thr_1/questions/appr_toolu_exampleABC",
+      ].includes(url.pathname)
+    ) {
       return respond(202, { ok: true, result: { threadId: "thr_1", runId: "run_1" } });
     }
     if (url.pathname === "/api/threads/thr_1") return respond(200, { ok: true, thread });
@@ -169,6 +178,10 @@ const makeHarness = () => {
     return respond(404, { ok: false, error: "not_found" });
   });
   const layer = HopliteCloud.layer.pipe(
+    Layer.provide(
+      devin === undefined ? DevinCloud.layer : Layer.succeed(DevinCloud.DevinCloud, devin),
+    ),
+    Layer.provide(NodeServices.layer),
     Layer.provide(Layer.succeed(ServerSecretStore.ServerSecretStore, secrets)),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
     Layer.provide(NodeCrypto.layer),
@@ -193,6 +206,124 @@ it.effect("a rejected key is never saved and its text stays out of the error", (
     assert.deepInclude(yield* hoplite.status, { connected: false, problem: null });
   }).pipe(Effect.provide(harness.layer));
 });
+
+it.effect(
+  "connects Devin with the host login and routes its tasks without sandbox credentials",
+  () => {
+    const calls: Array<string> = [];
+    const nativeId = `devin-${"1".repeat(32)}`;
+    const task = {
+      threadId: `devin:${nativeId}`,
+      projectId: "acme/web",
+      title: "Fix login",
+      status: "running",
+      latestReply: null,
+      pullRequestUrl: null,
+    } satisfies import("@t3tools/contracts").HopliteCloudTask;
+    const read = {
+      task,
+      run: { id: "run-1", status: "running" },
+    } satisfies HopliteCloud.HopliteTaskRead;
+    const native = DevinCloud.DevinCloud.of({
+      verify: Effect.sync(() => {
+        calls.push("verify");
+      }),
+      start: (input) =>
+        Effect.sync(() => {
+          calls.push(`start:${input.repo}`);
+          return { task, runId: "run-1" };
+        }),
+      read: (id) =>
+        Effect.sync(() => {
+          calls.push(`read:${id}`);
+          return read;
+        }),
+      send: (id, message) =>
+        Effect.sync(() => {
+          calls.push(`send:${id}:${message}`);
+          return { runId: "run-2" };
+        }),
+      stop: (id) =>
+        Effect.sync(() => {
+          calls.push(`stop:${id}`);
+          return read;
+        }),
+      questions: () =>
+        Effect.succeed([
+          {
+            questionId: "question-1",
+            parts: [{ question: "Continue?", options: [{ label: "Yes", description: "" }] }],
+          },
+        ]),
+      answer: (id, questionId, answer) =>
+        Effect.sync(() => {
+          calls.push(`answer:${id}:${questionId}:${answer}`);
+          return { runId: "run-1" };
+        }),
+      watch: () => Stream.empty,
+      disconnect: Effect.sync(() => {
+        calls.push("disconnect");
+      }),
+    });
+    const harness = makeHarness(native);
+    return Effect.gen(function* () {
+      const cloud = yield* HopliteCloud.HopliteCloud;
+      assert.equal(
+        yield* errorCode(
+          cloud.startTask({ provider: "devin", repo: "acme/web", prompt: "Fix login" }),
+        ),
+        "not_connected",
+      );
+      const status = yield* cloud.connect("devin");
+      assert.deepStrictEqual(
+        status.providers?.find((entry) => entry.provider === "devin"),
+        { provider: "devin", connected: true, problem: null },
+      );
+      assert.isTrue(yield* cloud.connected);
+      const input = {
+        provider: "devin",
+        repo: "acme/web",
+        prompt: "Fix login",
+        clientRequestId: "req-1",
+      } as const;
+      yield* cloud.startTask(input);
+      yield* cloud.startTask(input);
+      assert.equal(calls.filter((call) => call.startsWith("start:")).length, 1);
+      assert.deepStrictEqual(yield* cloud.readTask({ threadId: task.threadId }), read);
+      yield* cloud.sendMessage({ threadId: task.threadId, message: "Continue" });
+      assert.equal(
+        (yield* cloud.listQuestions({ threadId: task.threadId }))[0]?.questionId,
+        "question-1",
+      );
+      yield* cloud.answerQuestion({
+        threadId: task.threadId,
+        questionId: "question-1",
+        answer: "Yes",
+      });
+      yield* cloud.answerQuestion({
+        threadId: task.threadId,
+        questionId: "question-1",
+        answer: "",
+        dismiss: true,
+      });
+      yield* cloud.stopTask({ threadId: task.threadId });
+      assert.equal((yield* cloud.preview({ threadId: task.threadId })).status, "unsupported");
+      assert.equal(
+        yield* errorCode(cloud.runInSandbox({ sandboxId: task.threadId, command: "echo hello" })),
+        "not_found",
+      );
+      assert.include(calls, `send:${nativeId}:Continue`);
+      assert.include(calls, `answer:${nativeId}:question-1:Yes`);
+      assert.include(calls, `answer:${nativeId}:question-1:null`);
+      assert.include(calls, `stop:${nativeId}`);
+      yield* cloud.disconnect("devin");
+      assert.include(calls, "disconnect");
+      assert.isFalse(yield* cloud.connected);
+      assert.equal(yield* errorCode(cloud.readTask({ threadId: task.threadId })), "not_connected");
+      assert.isEmpty(harness.sent);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
 
 it.effect("rejects an agent choice it cannot honor", () => {
   const harness = makeHarness();
@@ -375,6 +506,7 @@ it.effect("a task reports its questions and takes an answer", () => {
     assert.deepStrictEqual(questions, [
       {
         questionId: "q_1",
+        runId: "run_1",
         parts: [
           {
             question: "Keep the old session cookie?",
@@ -397,6 +529,25 @@ it.effect("a task reports its questions and takes an answer", () => {
     const answer = harness.sent.find((request) => request.path.endsWith("/questions/q_1"));
     assert.deepStrictEqual(answer?.body, { answer: "Yes" });
     assert.equal(answer?.headers["idempotency-key"], "t3code:req-3");
+    yield* hoplite.answerQuestion({
+      threadId: "thr_1",
+      questionId: "q_1",
+      answer: "Dismiss",
+      dismiss: true,
+    });
+    const dismissed = harness.sent
+      .filter((request) => request.path.endsWith("/questions/q_1"))
+      .at(-1);
+    assert.deepStrictEqual(dismissed?.body, { answers: null });
+    assert.equal(dismissed?.headers["idempotency-key"], "t3code:answer:q_1");
+    assert.deepStrictEqual(
+      yield* hoplite.answerQuestion({
+        threadId: "thr_1",
+        questionId: "appr_toolu_exampleABC",
+        answer: "Yes",
+      }),
+      { runId: "run_1" },
+    );
   }).pipe(Effect.provide(harness.layer));
 });
 

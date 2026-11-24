@@ -144,30 +144,41 @@ function HopliteCloudSetup({ provider }: { provider: CloudSandboxProvider }) {
         onSubmit={async (event) => {
           event.preventDefault();
           const key = apiKey.trim();
-          if (key === "" || pending) return;
-          if (await run(() => connect({ environmentId, input: { provider, apiKey: key } }))) {
+          if ((provider !== "devin" && key === "") || pending) return;
+          if (
+            await run(() =>
+              connect({
+                environmentId,
+                input: provider === "devin" ? { provider } : { provider, apiKey: key },
+              }),
+            )
+          ) {
             setApiKey("");
           }
         }}
       >
-        <label className="block">
-          <span className="mb-1.5 block text-xs font-medium text-foreground">
-            {gt("{provider} API key", { provider: selected.name })}
-          </span>
-          <Input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={selected.keyPlaceholder}
-            disabled={pending}
-          />
-        </label>
+        {provider === "devin" ? null : (
+          <label className="block">
+            <span className="mb-1.5 block text-xs font-medium text-foreground">
+              {gt("{provider} API key", { provider: selected.name })}
+            </span>
+            <Input
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={selected.keyPlaceholder}
+              disabled={pending}
+            />
+          </label>
+        )}
         <p className="text-xs text-muted-foreground">
-          {gt("{help} It''s saved on this computer and never shown in the app again.", {
-            help: m(selected.keyHelp),
-          })}
+          {provider === "devin"
+            ? m(selected.keyHelp)
+            : gt("{help} It''s saved on this computer and never shown in the app again.", {
+                help: m(selected.keyHelp),
+              })}
         </p>
         {error ? (
           <Alert variant="error">
@@ -175,12 +186,18 @@ function HopliteCloudSetup({ provider }: { provider: CloudSandboxProvider }) {
           </Alert>
         ) : null}
         <div className="flex justify-end">
-          <Button type="submit" size="sm" disabled={pending || apiKey.trim() === ""}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={pending || (provider !== "devin" && apiKey.trim() === "")}
+          >
             {pending
               ? gt("Connecting…")
-              : selectedStatus?.connected
-                ? gt("Replace {provider} key", { provider: selected.name })
-                : gt("Connect {provider}", { provider: selected.name })}
+              : provider === "devin" && selectedStatus?.connected
+                ? gt("Check connection")
+                : selectedStatus?.connected
+                  ? gt("Replace {provider} key", { provider: selected.name })
+                  : gt("Connect {provider}", { provider: selected.name })}
           </Button>
         </div>
       </form>
@@ -409,7 +426,11 @@ export function HopliteCloudSection() {
                 : cloudSandboxProviderInfo(selectedProvider).name}
             </DialogTitle>
             <DialogDescription>
-              <T>Keys stay on this machine.</T>
+              {selectedProvider === "devin" ? (
+                <T>Your Devin login stays on this environment.</T>
+              ) : (
+                <T>Keys stay on this machine.</T>
+              )}
             </DialogDescription>
           </DialogHeader>
           <DialogPanel>

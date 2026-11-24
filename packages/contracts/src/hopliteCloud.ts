@@ -8,7 +8,13 @@ import { NodeId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
  * holding a provider's API key starts and reads tasks there; clients and agents only
  * ever see task records, never a key.
  */
-export const CloudSandboxProvider = Schema.Literals(["hoplite", "e2b", "daytona", "agent37"]);
+export const CloudSandboxProvider = Schema.Literals([
+  "hoplite",
+  "e2b",
+  "daytona",
+  "agent37",
+  "devin",
+]);
 export type CloudSandboxProvider = typeof CloudSandboxProvider.Type;
 
 /** The agent a sandbox task runs: Claude Code by default, or Codex. */
@@ -66,11 +72,14 @@ export const HopliteCloudClearAgentCredentialInput = Schema.Struct({
 export type HopliteCloudClearAgentCredentialInput =
   typeof HopliteCloudClearAgentCredentialInput.Type;
 
-export const HopliteCloudConnectInput = Schema.Struct({
-  /** Omitted means Hoplite. */
-  provider: Schema.optional(CloudSandboxProvider),
-  apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
-});
+export const HopliteCloudConnectInput = Schema.Union([
+  Schema.Struct({
+    /** Omitted means Hoplite. */
+    provider: Schema.optional(Schema.Literals(["hoplite", "e2b", "daytona", "agent37"])),
+    apiKey: TrimmedNonEmptyString.check(Schema.isMaxLength(512)),
+  }),
+  Schema.Struct({ provider: Schema.Literal("devin") }),
+]);
 export type HopliteCloudConnectInput = typeof HopliteCloudConnectInput.Type;
 
 export const HopliteCloudDisconnectInput = Schema.Struct({
@@ -146,14 +155,16 @@ export const HopliteCloudAnswerInput = Schema.Struct({
   threadId: HopliteId,
   questionId: HopliteId,
   answer: TrimmedNonEmptyString.check(Schema.isMaxLength(10_000)),
+  dismiss: Schema.optional(Schema.Boolean),
   /** Makes retries send one answer. */
   clientRequestId: Schema.optional(TrimmedNonEmptyString.check(Schema.isMaxLength(64))),
 });
 export type HopliteCloudAnswerInput = typeof HopliteCloudAnswerInput.Type;
 
-/** A question a Hoplite agent stopped to ask; one answer covers all its parts. */
+/** A cloud delegate's question; its task and question ids route the answer. */
 export const HopliteCloudQuestion = Schema.Struct({
   questionId: HopliteId,
+  runId: Schema.optional(Schema.String),
   parts: Schema.Array(
     Schema.Struct({
       question: Schema.String,

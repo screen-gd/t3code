@@ -12825,5 +12825,8 @@
   "99d51127f573296b": "Weiteres Konto",
   "8ec2c57414669b79": "Verbinde einen zweiten {tracker}-Workspace oder -Nutzer.",
   "99963c0142e17f00": "Für das neue {tracker}-Konto.",
-  "6d8e4ebc889bace9": "Konto hinzufügen"
+  "6d8e4ebc889bace9": "Konto hinzufügen",
+  "f4cc8d9998d3662d": "Verwendet die Devin-CLI-Anmeldung in dieser Umgebung. Installiere zuerst Devin und führe `devin auth login` aus.",
+  "857e609564db2202": "Verbindung prüfen",
+  "a586e79f329ec55d": "Deine Devin-Anmeldung bleibt in dieser Umgebung."
 }

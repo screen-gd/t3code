@@ -205,6 +205,7 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
         parentRunId: parent.runId,
         parentNodeId: parent.rootNodeId,
         task: "Run the suite there.",
+        title: "Key test",
         driver: ProviderDriverKind.make("remote"),
         modelSelection,
         remoteChild,
@@ -221,6 +222,27 @@ it.layer(layerTest)("a delegated task in a linked environment", (it) => {
       assert.equal(task?.status, "running");
       const item = projection.turnItems.find((candidate) => candidate.type === "subagent");
       assert.deepEqual(item?.type === "subagent" ? item.remoteChild : undefined, remoteChild);
+      if (task === undefined) throw new Error("Remote task was not recorded");
+      for (const status of ["waiting", "running"] as const) {
+        const update = {
+          type: "delegated_task.remote.progress" as const,
+          commandId: CommandId.make(`command:remote-progress:${status}`),
+          parentThreadId: parent.threadId,
+          taskId: task.id,
+          status,
+          ...(status === "running" ? { runId: RunId.make("run:answered-question") } : {}),
+        };
+        yield* orchestrator.dispatch(update);
+        yield* orchestrator.dispatch(update);
+        const updated = yield* orchestrator.getThreadProjection(parent.threadId);
+        assert.equal(updated.subagents[0]?.title, "Key test");
+        assert.equal(updated.subagents[0]?.status, status);
+        assert.equal(updated.subagents[0]?.result, null);
+        assert.equal(updated.turnItems.find((item) => item.type === "subagent")?.status, status);
+        assert.equal(updated.nodes.find((node) => node.id === task.id)?.status, status);
+        if (status === "running")
+          assert.equal(updated.subagents[0]?.remoteChild?.runId, "run:answered-question");
+      }
       // No thread was created here for the child.
       assert.equal(yield* orchestrator.getThreadShell(remoteChild.threadId), null);
       const other = yield* seedLiveParent("records-no-task");

@@ -15,7 +15,7 @@ import {
   type HopliteCloudGetTaskInput,
   HopliteCloudPreview,
   type HopliteCloudPreviewInput,
-  type HopliteCloudQuestion,
+  HopliteCloudQuestion,
   type HopliteCloudSendMessageInput,
   type HopliteCloudStartTaskInput,
   type HopliteCloudStatus,
@@ -32,6 +32,7 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
@@ -42,6 +43,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
+import * as DevinCloud from "./DevinCloud.ts";
 import {
   type AgentKeys,
   type CommandResult,
@@ -64,6 +66,7 @@ import {
   STOP_SCRIPT,
 } from "./CloudSandboxTasks.ts";
 import { HOPLITE_ACP_URL, watchHopliteThreadChat } from "./HopliteTaskChat.ts";
+import { answerQuestionScript, readQuestionsScript } from "./CloudSandboxQuestions.ts";
 
 export const HOPLITE_API_BASE_URL = "https://api.hoplite.sh";
 export const HOPLITE_API_KEY_SECRET = "hoplite-cloud-api-key";
@@ -82,6 +85,7 @@ const CLOUD_SANDBOX_PROVIDERS: ReadonlyArray<CloudSandboxProvider> = [
   "e2b",
   "daytona",
   "agent37",
+  "devin",
 ];
 /** Hoplite keeps the name its key had before other providers were added. */
 const apiKeySecretFor = (provider: CloudSandboxProvider) =>
@@ -154,6 +158,7 @@ const QuestionsResponse = Schema.Struct({
   questions: Schema.Array(
     Schema.Struct({
       questionId: Schema.String,
+      runId: Schema.optional(Schema.String),
       request: Schema.Struct({
         questions: Schema.Array(
           Schema.Struct({
@@ -199,6 +204,7 @@ export interface HopliteRun {
 export interface HopliteTaskRead {
   readonly task: HopliteCloudTask;
   readonly run: HopliteRun | null;
+  readonly questionRunId?: string;
 }
 
 export interface HopliteStartedTask {
@@ -215,7 +221,7 @@ export class HopliteCloud extends Context.Service<
     readonly connected: Effect.Effect<boolean>;
     readonly connect: (
       provider: CloudSandboxProvider,
-      apiKey: string,
+      apiKey?: string,
     ) => Effect.Effect<HopliteCloudStatus, HopliteCloudError>;
     readonly disconnect: (
       provider: CloudSandboxProvider,
@@ -235,7 +241,7 @@ export class HopliteCloud extends Context.Service<
       input: HopliteCloudGetTaskInput,
     ) => Effect.Effect<HopliteCloudTask, HopliteCloudError>;
     readonly readTask: (
-      input: HopliteCloudGetTaskInput & { readonly runId?: string },
+      input: HopliteCloudGetTaskInput & { readonly runId?: string; readonly title?: string },
     ) => Effect.Effect<HopliteTaskRead, HopliteCloudError>;
     /** Returns the run the message started, or null when it waits behind the active one. */
     readonly sendMessage: (
@@ -304,10 +310,11 @@ const TASK_ID_FORMATS: Record<CloudSandboxProvider, RegExp> = {
   e2b: /^[a-z0-9]{1,64}$/,
   daytona: /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/,
   agent37: /^[a-z0-9]{1,64}$/,
+  devin: /^devin-[a-f0-9]{32}$/,
 };
 const MAX_SANDBOX_OUTPUT = 100_000;
 const MAX_REMEMBERED_REQUESTS = 500;
-const HOPLITE_QUESTION_ID_FORMAT = /^q_[A-Za-z0-9_-]{1,128}$/;
+const HOPLITE_QUESTION_ID_FORMAT = /^[A-Za-z0-9_-]{1,128}$/;
 
 const invalidId = (provider: CloudSandboxProvider, what: string) =>
   Effect.fail(
@@ -355,12 +362,17 @@ const codeForStatus = (status: number): HopliteCloudErrorCode => {
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
+const decodeSandboxQuestions = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Array(HopliteCloudQuestion)),
+);
 
 const make = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
   const httpClient = yield* HttpClient.HttpClient;
   const environment = yield* HostProcess.Environment;
   const random = yield* SecureRandom.SecureRandom;
+  const devin = yield* DevinCloud.DevinCloud;
+  const devinWrites = yield* Semaphore.make(1);
 
   const readSecret = (name: string) =>
     secrets.get(name).pipe(
@@ -373,6 +385,17 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError(() => failure("unavailable")));
   const removeSecret = (name: string) =>
     secrets.remove(name).pipe(Effect.mapError(() => failure("unavailable")));
+  const taskTitle = Effect.fn("HopliteCloud.taskTitle")(function* (
+    threadId: string,
+    title?: string | null,
+  ) {
+    const name = `cloud-task-title-${threadId.replaceAll(":", "-")}`;
+    const saved = yield* readSecret(name);
+    if (Option.isSome(saved)) return saved.value;
+    if (title == null || title.trim() === "") return null;
+    yield* saveSecret(name, title);
+    return title;
+  });
   const keyFor = (provider: CloudSandboxProvider) =>
     readSecret(apiKeySecretFor(provider)).pipe(
       Effect.flatMap(
@@ -569,6 +592,7 @@ const make = Effect.gen(function* () {
     provider: SessionProvider,
     id: string,
     runId?: string,
+    title?: string,
   ) {
     // turn-N reads that turn; queued-N reads whichever run the queue item became.
     const named = runId === undefined ? undefined : /^(turn|queued)-([1-9]\d{0,8})$/.exec(runId);
@@ -594,16 +618,18 @@ const make = Effect.gen(function* () {
       },
       runId,
     );
+    const questionTurn = /^turn=([1-9]\d*)$/m.exec(result.output)?.[1];
     return {
       task: {
         threadId: `${provider}:${id}`,
         projectId: provider,
-        title: null,
+        title: yield* taskTitle(`${provider}:${id}`, title),
         status: turn.thread,
         latestReply: turn.latestReply,
         pullRequestUrl: turn.pullRequestUrl,
       },
       run: turn.run,
+      ...(questionTurn === undefined ? {} : { questionRunId: `turn-${questionTurn}` }),
     } satisfies HopliteTaskRead;
   });
   const send = <A, I>(
@@ -636,17 +662,19 @@ const make = Effect.gen(function* () {
 
   // One project is enough to prove a Hoplite key works.
   const verifyKey = (provider: CloudSandboxProvider, apiKey: string) =>
-    provider === "hoplite"
-      ? Effect.asVoid(
-          send(
-            apiKey,
-            HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
-              HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
+    provider === "devin"
+      ? devin.verify
+      : provider === "hoplite"
+        ? Effect.asVoid(
+            send(
+              apiKey,
+              HttpClientRequest.get(`${HOPLITE_API_BASE_URL}/api/projects`).pipe(
+                HttpClientRequest.setUrlParams({ pagination: "cursor", limit: "1" }),
+              ),
+              ProjectsPage,
             ),
-            ProjectsPage,
-          ),
-        )
-      : sessionOf(provider).verify(apiKey);
+          )
+        : sessionOf(provider).verify(apiKey);
 
   // Normalized repo -> project id, so a task skips listing every project. Cleared whenever the
   // key changes, as another key may see other projects.
@@ -705,8 +733,14 @@ const make = Effect.gen(function* () {
 
   const connect = Effect.fn("HopliteCloud.connect")(function* (
     provider: CloudSandboxProvider,
-    apiKey: string,
+    apiKey?: string,
   ) {
+    if (provider === "devin") {
+      yield* devin.verify;
+      yield* saveSecret(apiKeySecretFor(provider), "cli-login");
+      return yield* status;
+    }
+    if (apiKey === undefined) return yield* failure("invalid_key", provider);
     // Check the key before saving it so a typo never replaces a working one.
     yield* verifyKey(provider, apiKey);
     yield* retire(apiKeySecretFor(provider));
@@ -718,6 +752,11 @@ const make = Effect.gen(function* () {
   const disconnect = Effect.fn("HopliteCloud.disconnect")(function* (
     provider: CloudSandboxProvider,
   ) {
+    if (provider === "devin") {
+      yield* devin.disconnect;
+      yield* removeSecret(apiKeySecretFor(provider));
+      return yield* status;
+    }
     yield* retire(apiKeySecretFor(provider));
     yield* removeSecret(apiKeySecretFor(provider));
     projectIds.clear();
@@ -800,15 +839,24 @@ const make = Effect.gen(function* () {
   const readTask = Effect.fn("HopliteCloud.readTask")(function* ({
     threadId: taskId,
     runId,
-  }: HopliteCloudGetTaskInput & { readonly runId?: string }) {
+    title,
+  }: HopliteCloudGetTaskInput & { readonly runId?: string; readonly title?: string }) {
     const { provider, id: threadId } = yield* taskOf(taskId);
-    if (provider !== "hoplite") return yield* sessionTask(provider, threadId, runId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devin.read(threadId, runId);
+    }
+    if (provider !== "hoplite") return yield* sessionTask(provider, threadId, runId, title);
     const apiKey = yield* requireKey;
     const [thread, activeRunId] = yield* Effect.all(
       [readThread(apiKey, threadId), readActiveRunId(apiKey, threadId)],
       { concurrency: "unbounded" },
     );
-    return taskRead(thread, yield* readRunStateOf(apiKey, threadId, activeRunId));
+    const read = taskRead(thread, yield* readRunStateOf(apiKey, threadId, runId ?? activeRunId));
+    return {
+      ...read,
+      task: { ...read.task, title: yield* taskTitle(taskId, title ?? read.task.title) },
+    };
   });
 
   const getTask = (input: HopliteCloudGetTaskInput) =>
@@ -898,7 +946,7 @@ const make = Effect.gen(function* () {
       task: {
         threadId: `${provider}:${id}`,
         projectId: input.repo ?? provider,
-        title: input.title ?? null,
+        title: yield* taskTitle(`${provider}:${id}`, input.title ?? input.prompt.slice(0, 80)),
         status: "running",
         latestReply: null,
         pullRequestUrl: null,
@@ -911,6 +959,27 @@ const make = Effect.gen(function* () {
     input: HopliteCloudStartTaskInput,
   ) {
     const provider = input.provider ?? "hoplite";
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devinWrites.withPermit(
+        remembered(
+          startedTasks,
+          input.clientRequestId === undefined
+            ? undefined
+            : [
+                "devin",
+                input.clientRequestId,
+                input.prompt,
+                input.repo,
+                input.title,
+                input.model,
+                input.agent,
+                input.template,
+              ].join("\u0000"),
+          devin.start(input),
+        ),
+      );
+    }
     if (provider !== "hoplite") {
       return yield* remembered(
         startedTasks,
@@ -978,7 +1047,14 @@ const make = Effect.gen(function* () {
               },
             ),
           );
-    return { task: toTask(thread, null), runId: run?.id ?? null } satisfies HopliteStartedTask;
+    const task = toTask(thread, null);
+    return {
+      task: {
+        ...task,
+        title: yield* taskTitle(thread.id, input.title ?? task.title ?? input.prompt.slice(0, 80)),
+      },
+      runId: run?.id ?? null,
+    } satisfies HopliteStartedTask;
   });
 
   // While a turn still runs the message waits in the sandbox's queue and runId names
@@ -1023,6 +1099,19 @@ const make = Effect.gen(function* () {
     input: HopliteCloudSendMessageInput,
   ) {
     const { provider, id } = yield* taskOf(input.threadId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      if (input.model !== undefined) return yield* failure("unsupported", provider);
+      return yield* devinWrites.withPermit(
+        remembered(
+          sentMessages,
+          input.clientRequestId === undefined
+            ? undefined
+            : [input.threadId, input.clientRequestId, input.message].join("\u0000"),
+          devin.send(id, input.message),
+        ),
+      );
+    }
     if (provider !== "hoplite") {
       return yield* remembered(
         sentMessages,
@@ -1051,6 +1140,10 @@ const make = Effect.gen(function* () {
     threadId,
   }: HopliteCloudGetTaskInput) {
     const session = yield* taskOf(threadId);
+    if (session.provider === "devin") {
+      yield* keyFor("devin");
+      return (yield* devin.stop(session.id)).task;
+    }
     if (session.provider !== "hoplite") {
       const apiKey = yield* keyFor(session.provider);
       yield* sessionOf(session.provider).exec(apiKey, session.id, STOP_SCRIPT, {});
@@ -1076,6 +1169,12 @@ const make = Effect.gen(function* () {
     port,
   }: HopliteCloudPreviewInput) {
     const { provider, id } = yield* taskOf(threadId);
+    if (provider === "devin")
+      return {
+        status: "unsupported",
+        url: null,
+        reason: "Devin Cloud previews are available in the Devin session.",
+      } satisfies HopliteCloudPreview;
     if (provider !== "hoplite") {
       const apiKey = yield* keyFor(provider);
       return yield* sessionOf(provider)
@@ -1106,6 +1205,7 @@ const make = Effect.gen(function* () {
       Effect.map(({ questions }) =>
         questions.map((pending): HopliteCloudQuestion => ({
           questionId: pending.questionId,
+          ...(pending.runId === undefined ? {} : { runId: pending.runId }),
           parts: pending.request.questions.map((part) => ({
             question: part.question,
             options: part.options.map((option) => ({
@@ -1120,24 +1220,64 @@ const make = Effect.gen(function* () {
   const listQuestions = Effect.fn("HopliteCloud.listQuestions")(function* ({
     threadId,
   }: HopliteCloudGetTaskInput) {
-    // The agent in a sandbox asks in its reply, which comes back as a follow-up.
-    if ((yield* taskOf(threadId)).provider !== "hoplite") return [];
+    const { provider, id } = yield* taskOf(threadId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devin.questions(id);
+    }
+    if (provider !== "hoplite") {
+      const result = yield* sessionOf(provider).exec(
+        yield* keyFor(provider),
+        id,
+        readQuestionsScript(),
+        {},
+      );
+      if (result.exitCode !== 0) return yield* failure("unavailable", provider);
+      return yield* decodeSandboxQuestions(result.output.trim()).pipe(
+        Effect.mapError(() => failure("unavailable", provider)),
+      );
+    }
     return yield* fetchQuestions(yield* requireKey, threadId);
   });
 
   const answerQuestion = Effect.fn("HopliteCloud.answerQuestion")(function* (
     input: HopliteCloudAnswerInput,
   ) {
-    const { provider } = yield* taskOf(input.threadId);
-    if (provider !== "hoplite") return yield* failure("unsupported", provider);
+    const { provider, id } = yield* taskOf(input.threadId);
+    if (provider === "devin") {
+      yield* keyFor(provider);
+      return yield* devin.answer(
+        id,
+        input.questionId,
+        input.dismiss === true ? null : input.answer,
+      );
+    }
+    if (provider !== "hoplite") {
+      if (!/^q_[a-f0-9]{32}$/.test(input.questionId)) return yield* invalidId(provider, "question");
+      const result = yield* sessionOf(provider).exec(
+        yield* keyFor(provider),
+        id,
+        answerQuestionScript(),
+        {
+          T3_QUESTION_ID: input.questionId,
+          T3_QUESTION_ANSWER: input.answer,
+          T3_QUESTION_DISMISS: String(input.dismiss === true),
+        },
+      );
+      if (result.exitCode !== 0)
+        return yield* failure(result.exitCode === 2 ? "not_found" : "unavailable", provider);
+      return { runId: (yield* sessionTask(provider, id)).run?.id ?? null };
+    }
     if (!HOPLITE_QUESTION_ID_FORMAT.test(input.questionId))
       return yield* invalidId("hoplite", "question");
     const apiKey = yield* requireKey;
     const request = HttpClientRequest.post(
       `${threadPath(input.threadId)}/questions/${encodeURIComponent(input.questionId)}`,
     ).pipe(
-      yield* idempotent(input.clientRequestId),
-      HttpClientRequest.bodyJsonUnsafe({ answer: input.answer }),
+      yield* idempotent(input.clientRequestId ?? `answer:${input.questionId}`),
+      HttpClientRequest.bodyJsonUnsafe(
+        input.dismiss === true ? { answers: null } : { answer: input.answer },
+      ),
     );
     const { result } = yield* send(apiKey, request, AnswerResponse);
     return { runId: result.runId ?? null };
@@ -1215,6 +1355,14 @@ const make = Effect.gen(function* () {
 
   const watchThreadChat = (taskId: string, activity: Stream.Stream<void>) => {
     const parsed = providerOfTask(taskId);
+    if (parsed.provider === "devin")
+      return Stream.unwrap(
+        Effect.gen(function* () {
+          yield* taskOf(taskId);
+          yield* keyFor("devin");
+          return devin.watch(parsed.id);
+        }),
+      );
     if (parsed.provider !== "hoplite") {
       const provider = parsed.provider;
       return Stream.unwrap(
@@ -1252,7 +1400,8 @@ const make = Effect.gen(function* () {
 
   const sandboxOf = Effect.fn("HopliteCloud.sandboxOf")(function* (sandboxId: string) {
     const { provider, id } = yield* taskOf(sandboxId);
-    if (provider === "hoplite") return yield* invalidId("hoplite", "sandbox");
+    if (provider === "hoplite" || provider === "devin")
+      return yield* invalidId(provider, "sandbox");
     return { provider, id, apiKey: yield* keyFor(provider) };
   });
 

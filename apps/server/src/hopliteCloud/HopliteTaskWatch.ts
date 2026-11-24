@@ -2,7 +2,7 @@ import {
   CommandId,
   EnvironmentId,
   type HopliteCloudAnswerInput,
-  type HopliteCloudError,
+  HopliteCloudError,
   type HopliteCloudGetTaskInput,
   type HopliteCloudQuestion,
   type HopliteCloudSendMessageInput,
@@ -18,6 +18,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -35,6 +36,8 @@ import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.t
 import { forkParked } from "../serverActivation.ts";
 import { PROVIDER_NAMES, providerOfTask } from "./CloudSandboxProviders.ts";
 import * as HopliteCloud from "./HopliteCloudService.ts";
+import * as DevinCloud from "./DevinCloud.ts";
+import { replyNeedsInput } from "./CloudSandboxTasks.ts";
 
 // Survives restarts with the key it belongs to; holds thread ids only.
 const WATCHES_SECRET = "hoplite-cloud-task-watches";
@@ -60,6 +63,7 @@ const Watch = Schema.Struct({
   taskId: Schema.optional(Schema.String),
   /** Until Hoplite takes this answer, its run still reads as waiting on the question. */
   answeredQuestionId: Schema.optional(Schema.String),
+  notifiedQuestionIds: Schema.optional(Schema.Array(Schema.String)),
 });
 type HopliteTaskWatchEntry = typeof Watch.Type;
 const WatchesJson = Schema.fromJsonString(Schema.Array(Watch));
@@ -138,7 +142,7 @@ function settledWake(
             questions.length === 0
               ? "Reply with cloud_task and its threadId."
               : "Answer with cloud_task, its threadId and the questionId."
-          } If this thread cannot decide, ask the user.`,
+          } Answer from existing context when possible. Otherwise ask the user through your interactive picker with these options, then relay the answer to this exact task and question. Only pass dismiss:true for an explicit user dismissal. Navigation, disconnects and ending a turn leave it pending.`,
           "updated",
         ] as const)
       : status === "failed"
@@ -265,6 +269,35 @@ const make = Effect.gen(function* () {
   const resultFor = (task: HopliteCloudTask, watched: boolean): HopliteCloudTaskResult =>
     watched ? { ...task, next: HOPLITE_TASK_WAKES_NEXT } : task;
 
+  const progress = (
+    watch: HopliteTaskWatchEntry,
+    status: "running" | "waiting",
+    key: string,
+    runId?: string | null,
+  ) =>
+    watch.taskId === undefined
+      ? Effect.void
+      : engine
+          .dispatch({
+            type: "delegated_task.remote.progress",
+            commandId: CommandId.make(`server:cloud-progress:${watch.taskId}:${status}:${key}`),
+            parentThreadId: ThreadId.make(watch.callerThreadId),
+            taskId: NodeId.make(watch.taskId),
+            status,
+            ...(runId === undefined ? {} : { runId: runId === null ? null : RunId.make(runId) }),
+          })
+          .pipe(
+            Effect.asVoid,
+            Effect.mapError(
+              () =>
+                new HopliteCloudError({
+                  code: "unavailable",
+                  message:
+                    "The cloud task is continuing, but its status could not be saved. Retry the request.",
+                }),
+            ),
+          );
+
   /**
    * Shows the run as a delegated-task card under the caller's active run, as a task in a
    * linked environment is shown. Without an active run there is nothing to hang it on.
@@ -390,16 +423,47 @@ const make = Effect.gen(function* () {
     return resultFor(started.task, watched);
   });
 
+  // Older sandbox tasks kept their title only in the caller's durable card.
+  const readForCaller = Effect.fn("HopliteTaskWatch.readForCaller")(function* (
+    threadId: string,
+    callerThreadId: string | undefined,
+  ) {
+    const title =
+      callerThreadId === undefined
+        ? undefined
+        : (yield* engine.getThreadRecords(ThreadId.make(callerThreadId), ["subagents"]).pipe(
+            Effect.mapError(
+              () =>
+                new HopliteCloudError({
+                  code: "unavailable",
+                  message: "The cloud task's saved title could not be read.",
+                }),
+            ),
+          )).subagents
+            .toSorted(
+              (a, b) =>
+                DateTime.toEpochMillis(a.startedAt ?? a.updatedAt) -
+                DateTime.toEpochMillis(b.startedAt ?? b.updatedAt),
+            )
+            .find((task) => task.remoteChild?.threadId === threadId && task.title != null)?.title;
+    return yield* hoplite.readTask({ threadId, ...(title == null ? {} : { title }) });
+  });
+
   const sendMessage = Effect.fn("HopliteTaskWatch.sendMessage")(function* (
     input: HopliteCloudSendMessageInput,
     callerThreadId: string | undefined,
   ) {
     // A message queued behind the active run gets no run id; the run before it is the baseline.
-    const before = yield* hoplite.readTask({ threadId: input.threadId });
+    const before = yield* readForCaller(input.threadId, callerThreadId);
     const { runId } = yield* hoplite.sendMessage(input);
+    const continuing = {
+      ...before.task,
+      status: "running",
+      latestReply: null,
+    } satisfies HopliteCloudTask;
     if (callerThreadId === undefined) {
       yield* touched(input.threadId);
-      return before.task;
+      return continuing;
     }
     const taskId = yield* recordCard({
       callerThreadId,
@@ -420,28 +484,39 @@ const make = Effect.gen(function* () {
     });
     // After the watch is saved, so a chat reloading on this reads the new run as going.
     yield* touched(input.threadId);
-    return resultFor(before.task, watched);
+    return resultFor(continuing, watched);
   });
 
   const answerQuestion = Effect.fn("HopliteTaskWatch.answerQuestion")(function* (
     input: HopliteCloudAnswerInput,
     callerThreadId: string | undefined,
   ) {
-    const before = yield* hoplite.readTask({ threadId: input.threadId });
+    const before = yield* readForCaller(input.threadId, callerThreadId);
     const answered = yield* hoplite.answerQuestion(input);
+    const continuing = {
+      ...before.task,
+      status: "running",
+      latestReply: null,
+    } satisfies HopliteCloudTask;
     if (callerThreadId === undefined) {
       yield* touched(input.threadId);
-      return before.task;
+      return continuing;
     }
     const runId = answered.runId;
-    const taskId = yield* recordCard({
-      callerThreadId,
-      hopliteThreadId: input.threadId,
-      runId,
-      prompt: input.answer,
-      title: before.task.title ?? undefined,
-      key: `answer:${input.questionId}`,
-    });
+    const previous = (yield* Ref.get(watches)).find(
+      (watch) =>
+        watch.hopliteThreadId === input.threadId && watch.callerThreadId === callerThreadId,
+    );
+    const taskId =
+      previous?.taskId ??
+      (yield* recordCard({
+        callerThreadId,
+        hopliteThreadId: input.threadId,
+        runId,
+        prompt: input.answer,
+        title: before.task.title ?? undefined,
+        key: `answer:${input.questionId}`,
+      }));
     const watched = yield* addOrClose({
       callerThreadId,
       hopliteThreadId: input.threadId,
@@ -451,10 +526,14 @@ const make = Effect.gen(function* () {
       seen: false,
       failures: 0,
       answeredQuestionId: input.questionId,
+      ...(previous?.notifiedQuestionIds === undefined
+        ? {}
+        : { notifiedQuestionIds: previous.notifiedQuestionIds }),
       ...(taskId === undefined ? {} : { taskId }),
     });
+    if (previous !== undefined) yield* progress(previous, "running", input.questionId, runId);
     yield* touched(input.threadId);
-    return resultFor(before.task, watched);
+    return resultFor(continuing, watched);
   });
 
   const stopTask = Effect.fn("HopliteTaskWatch.stopTask")(function* (
@@ -489,9 +568,13 @@ const make = Effect.gen(function* () {
     engine
       .dispatch({
         type: "message.dispatch",
-        commandId: CommandId.make(`server:hoplite-task:${watch.hopliteThreadId}:${key}`),
+        commandId: CommandId.make(
+          `server:hoplite-task:${watch.callerThreadId}:${watch.hopliteThreadId}:${key}`,
+        ),
         threadId: ThreadId.make(watch.callerThreadId),
-        messageId: MessageId.make(`message:hoplite-task:${watch.hopliteThreadId}:${key}`),
+        messageId: MessageId.make(
+          `message:hoplite-task:${watch.callerThreadId}:${watch.hopliteThreadId}:${key}`,
+        ),
         text: message.text,
         notification: message.notification,
         attachments: [],
@@ -499,10 +582,7 @@ const make = Effect.gen(function* () {
         createdBy: "agent",
         creationSource: "server",
       })
-      .pipe(
-        // An archived or deleted thread has no agent left to wake.
-        Effect.catchCause((cause) => Effect.logWarning("hoplite-cloud.wake-failed", { cause })),
-      );
+      .pipe(Effect.asVoid);
 
   const settle = (
     watch: HopliteTaskWatchEntry,
@@ -547,18 +627,60 @@ const make = Effect.gen(function* () {
         "failed",
       );
     }
+    const questionRunId = watch.runId?.startsWith("queued-")
+      ? read.success.questionRunId
+      : (watch.runId ?? read.success.run?.id);
+    const questions = (yield* hoplite.listQuestions({ threadId: watch.hopliteThreadId })).filter(
+      (question) => question.runId === undefined || question.runId === questionRunId,
+    );
+    const unanswered = questions.filter(
+      (question) => question.questionId !== watch.answeredQuestionId,
+    );
+    if (unanswered.length > 0) {
+      const fresh = unanswered.filter(
+        (question) => !watch.notifiedQuestionIds?.includes(question.questionId),
+      );
+      for (const question of fresh) {
+        yield* progress(watch, "waiting", question.questionId);
+        yield* wake(
+          watch,
+          `question:${question.questionId}`,
+          settledWake(read.success.task, "waiting", [question]),
+        );
+      }
+      if (fresh.length > 0) {
+        yield* replace(watch, {
+          ...watch,
+          notifiedQuestionIds: [
+            ...(watch.notifiedQuestionIds ?? []),
+            ...fresh.map((question) => question.questionId),
+          ],
+        });
+        yield* touched(watch.hopliteThreadId);
+      }
+      return;
+    }
     const step = stepWatch(watch, read.success.run);
     if (step.type === "wait") {
       if (step.watch === watch && watch.failures === 0) return;
       return yield* replace(watch, { ...step.watch, failures: 0 });
     }
+    if (
+      questions.length === 0 &&
+      (step.status === "waiting" ||
+        (step.status === "completed" && replyNeedsInput(read.success.task.latestReply)))
+    ) {
+      const key = `unstructured:${step.runId}`;
+      if (watch.notifiedQuestionIds?.includes(key)) return;
+      yield* progress(watch, "waiting", key);
+      yield* wake(watch, key, settledWake(read.success.task, "waiting", []));
+      yield* replace(watch, {
+        ...watch,
+        notifiedQuestionIds: [...(watch.notifiedQuestionIds ?? []), key],
+      });
+      return;
+    }
     // Hoplite ends the run that asked, so a question can be pending behind a completed run.
-    const questions =
-      step.status === "waiting" || step.status === "completed"
-        ? yield* hoplite
-            .listQuestions({ threadId: watch.hopliteThreadId })
-            .pipe(Effect.orElseSucceed((): ReadonlyArray<HopliteCloudQuestion> => []))
-        : [];
     const status = questions.length > 0 ? "waiting" : step.status;
     if (
       watch.answeredQuestionId !== undefined &&
@@ -617,7 +739,21 @@ const make = Effect.gen(function* () {
   );
 
   const sweep = Ref.get(watches).pipe(
-    Effect.flatMap((current) => Effect.forEach(current, check, { concurrency: 4, discard: true })),
+    Effect.flatMap((current) =>
+      Effect.forEach(
+        current,
+        (watch) =>
+          check(watch).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("cloud task question check failed", {
+                threadId: watch.hopliteThreadId,
+                cause,
+              }),
+            ),
+          ),
+        { concurrency: 4, discard: true },
+      ),
+    ),
     // Without a stored key no stop can be sent, so the cards are left for when one is.
     Effect.andThen(hoplite.connected),
     Effect.flatMap((connected) => (connected ? sweepCards : Effect.void)),
@@ -645,6 +781,6 @@ export const layer = Layer.effect(HopliteTaskWatch, make);
 
 /** One watcher per server: MCP tools and the task's chat pane share its watches. */
 export const layerLive = layer.pipe(
-  Layer.provideMerge(HopliteCloud.layer),
+  Layer.provideMerge(HopliteCloud.layer.pipe(Layer.provide(DevinCloud.layer))),
   Layer.provide(ProjectionStore.layer),
 );
