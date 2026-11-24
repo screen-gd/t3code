@@ -11,12 +11,14 @@ import {
   AnthropicIcon,
   AntigravityIcon,
   ClaudeAI,
+  HopliteIcon,
   Icon,
   OllamaIcon,
   OpenAI,
   OpenRouterIcon,
 } from "../Icons";
 
+import { HOPLITE_ACP_AGENT_ID } from "~/providerInstances";
 import { cn } from "~/lib/utils";
 import { providerClients } from "../settings/providerDriverMeta";
 import { ProviderPackageIcon } from "./ProviderPackageIcon";
@@ -79,7 +81,7 @@ export function resolveProviderInstanceAcpRegistryIconUrl(input: {
   readonly agentId?: string | undefined;
   readonly iconUrl?: string | undefined;
 }): string | null {
-  if (input.driverKind !== "acpRegistry") return null;
+  if (input.driverKind !== "acpRegistry" || input.agentId === HOPLITE_ACP_AGENT_ID) return null;
   return (
     resolveOfficialAcpRegistryIconUrl(input.iconUrl ?? null) ??
     officialAcpRegistryIconUrlForAgentId(input.agentId?.trim() || null)
@@ -113,6 +115,8 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
   const badgeContent = props.badgeContent ?? "initials";
   const iconClassName = cn(props.size === "compact" && "size-3.5", props.iconClassName);
   const isAcpRegistry = props.driverKind === "acpRegistry";
+  // The bundled Hoplite bridge is local, not a registry agent: its mark is bundled too.
+  const isHopliteAcp = isAcpRegistry && props.acpRegistryAgentId === HOPLITE_ACP_AGENT_ID;
   // A custom OpenAI-compatible endpoint has no brand: show its name, marked with the protocol.
   const isCustomEndpoint = props.driverKind === "openaiCompatible";
   const acpRegistryIconUrl = resolveProviderInstanceAcpRegistryIconUrl({
@@ -130,7 +134,9 @@ export const ProviderInstanceIcon = memo(function ProviderInstanceIcon(props: {
       style={accentStyle}
       data-provider-accent-color={accentColor}
     >
-      {isAcpRegistry ? (
+      {isHopliteAcp ? (
+        <HopliteIcon className={cn("size-5", iconClassName)} aria-hidden />
+      ) : isAcpRegistry ? (
         <AcpRegistryAgentIcon
           className={cn("size-5 rounded-none bg-transparent", iconClassName)}
           fallbackClassName="size-full"

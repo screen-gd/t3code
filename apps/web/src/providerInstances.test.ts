@@ -12,6 +12,7 @@ import {
   deriveProviderEntriesByEnvironment,
   deriveProviderInstanceEntries,
   getDefaultProviderInstanceModel,
+  HOPLITE_ACP_AGENT_ID,
   isProviderInstancePickerReady,
   resolveDefaultProviderModelSelection,
   resolveSelectableProviderInstance,
@@ -649,5 +650,35 @@ describe("provider icon metadata", () => {
     expect(restoredEntry?.acpRegistryAgentId).toBe("swe-agent");
     expect(restoredEntry?.acpRegistryIconUrl).toBe(iconUrl);
     expect(restoredEntry?.enabled).toBe(true);
+  });
+
+  it("brands only the exact bundled Hoplite bridge command with the Hoplite mark", () => {
+    const instanceId = ProviderInstanceId.make("acpRegistry_hoplite");
+    const driver = ProviderDriverKind.make("acpRegistry");
+    const entries = deriveProviderInstanceEntries([provider({ provider: driver, instanceId })]);
+    const branded = (config: unknown) =>
+      applyProviderInstanceSettings(
+        entries,
+        {
+          providerInstances: {
+            [instanceId]: { driver, enabled: true, config: config as never },
+          },
+          projectSettingsOverrides: {},
+        },
+        null,
+      )[0];
+
+    expect(
+      branded({ source: "local", commandPath: "t3", commandArgs: ["hoplite-acp"] })
+        ?.acpRegistryAgentId,
+    ).toBe(HOPLITE_ACP_AGENT_ID);
+    for (const config of [
+      { source: "local", commandPath: "t3", commandArgs: ["hoplite-acp", "--verbose"] },
+      { source: "local", commandPath: "t3", commandArgs: ["other-acp"] },
+      { source: "local", commandPath: "dsh", commandArgs: ["hoplite-acp"] },
+      { source: "local", commandPath: "t3" },
+    ]) {
+      expect(branded(config)?.acpRegistryAgentId).toBeUndefined();
+    }
   });
 });
