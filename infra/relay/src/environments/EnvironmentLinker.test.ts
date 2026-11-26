@@ -379,6 +379,34 @@ describe("EnvironmentLinker", () => {
     },
   );
 
+  it.effect("drops a leftover tunnel's live connector so its host can relink", () => {
+    let persisted = false;
+    return Effect.gen(function* () {
+      const { request } = yield* makeRequest;
+      const linker = yield* EnvironmentLinker.EnvironmentLinker;
+      yield* linker.link({ userId: "user_123", request });
+      expect(persisted).toBe(true);
+    }).pipe(
+      Effect.provide(
+        layerTest({
+          // Cloudflare refuses to delete a connected tunnel unless its connectors are dropped.
+          deprovision: (input) =>
+            input.forceDisconnect === true
+              ? Effect.succeed(true)
+              : Effect.fail(
+                  new ManagedEndpointProvider.ManagedEndpointDeprovisioningFailed({
+                    userId: input.userId,
+                    environmentId: input.environmentId,
+                    stage: "delete-tunnel",
+                    cause: "This tunnel has active connections",
+                  }),
+                ),
+          upsert: () => Effect.sync(() => void (persisted = true)),
+        }),
+      ),
+    );
+  });
+
   it.effect("rejects replayed JWT ids", () =>
     Effect.gen(function* () {
       const { request } = yield* makeRequest;

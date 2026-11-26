@@ -310,11 +310,17 @@ const make = Effect.gen(function* () {
       }
       // An unlink whose teardown failed leaves its tunnel behind, and provisioning would reuse it by
       // name. Finish the teardown before any new link, publish-only too: once that link is active
-      // it could turn tunnels on and inherit the old one.
+      // it could turn tunnels on and inherit the old one. Force it, because a revoked host keeps
+      // its connector up and Cloudflare refuses to delete a connected tunnel.
       if (existing === null) {
         const key = { userId: input.userId, environmentId: verified.environmentId };
         const leftover = yield* managedEndpointProvider.prepareDeprovision(key);
-        if (!(yield* managedEndpointProvider.deprovision({ ...key, target: leftover }))) {
+        const removed = yield* managedEndpointProvider.deprovision({
+          ...key,
+          target: leftover,
+          forceDisconnect: true,
+        });
+        if (!removed) {
           return yield* new ManagedEndpointProvider.ManagedEndpointDeprovisioningFailed({
             ...key,
             stage: "claim-deprovision",
